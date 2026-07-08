@@ -74,6 +74,7 @@ PROMPT_SINGLE = """
 - **绝对信任输入**: 忽略自动换算，直接读取用户提供的四柱干支。
 - **真太阳时校准**: 若用户提供出生地，需在后台微调起运时间。
 - **南北半球校准**: 若用户提供的出生地在南美洲，那么需要根据地理气候进行调整，比如12月在北半球是冬天，但是在南半球是夏天
+
 ### B. 能量量化计算
 - **静态权重**: 天干各36分；月令本气70分，其他地支本气40分；藏干中气15分，余气10分。
 - **修正系数**: 应用月令状态（旺相x1.2，休x0.8，囚x0.7，死x0.5）及自坐强根（x1.5）。
@@ -302,6 +303,10 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "current_prompt_type" not in st.session_state:
     st.session_state.current_prompt_type = "single"
+if "last_name" not in st.session_state:
+    st.session_state.last_name = ""
+if "last_birth" not in st.session_state:
+    st.session_state.last_birth = ""
 
 # --- 4. 数据持久化：优先 Google Sheets，SQLite 仅作本地兜底 ---
 RECORD_COLUMNS = ["id", "name", "birth_info", "report", "history", "date", "ptype"]
@@ -318,6 +323,56 @@ def get_config(section, key, env_name, default=""):
     except Exception:
         value = None
     return os.environ.get(env_name, value if value not in (None, "") else default)
+
+
+def has_non_ascii(value):
+    try:
+        str(value).encode("ascii")
+        return False
+    except UnicodeEncodeError:
+        return True
+
+
+def validate_api_config(api_key, base_url, model, label):
+    if not api_key:
+        return f"请先在 Streamlit Secrets 里填写{label} API Key。"
+
+    if has_non_ascii(api_key):
+        return f"{label} API Key 里含有中文或非英文字符。请不要填写 `sk-你的APIKey` 这种占位符，要换成平台给你的真实 key。"
+
+    if any(placeholder in api_key.lower() for placeholder in ["your", "api_key", "apikey", "placeholder"]):
+        return f"{label} API Key 看起来还是示例占位符，请换成真实 key。"
+
+    if has_non_ascii(base_url):
+        return f"{label} Base URL 里含有中文或非英文字符，请填写真实接口地址。"
+
+    if has_non_ascii(model):
+        return f"{label}模型名称里含有中文或非英文字符，请填写真实模型名。"
+
+    return ""
+
+
+def normalize_record_identity(name, birth, ptype):
+    name = str(name or "").strip()
+    birth = str(birth or "").strip()
+    ptype = str(ptype or "single").strip()
+    return name, birth, ptype
+
+
+def validate_record_identity(name, birth, ptype):
+    name, birth, ptype = normalize_record_identity(name, birth, ptype)
+    if not name:
+        return "请先填写姓名/代称，否则历史档案无法识别是谁的测算。"
+    if not birth:
+        return "请先填写生辰/生日信息，否则历史档案无法识别是哪一次测算。"
+    return ""
+
+
+def set_current_record_identity(name, birth, ptype):
+    name, birth, ptype = normalize_record_identity(name, birth, ptype)
+    st.session_state.last_name = name
+    st.session_state.last_birth = birth
+    st.session_state.current_prompt_type = ptype
 
 
 def get_gsheets_worksheet():
@@ -471,18 +526,21 @@ def save_to_gsheets(name, birth, report, history, ptype="single"):
         worksheet = get_gsheets_worksheet()
         df = normalize_records_df(gsheets.read(worksheet=worksheet, ttl=0))
         date_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        name = str(name)
-        birth = str(birth)
+        name, birth, ptype = normalize_record_identity(name, birth, ptype)
         history_str = history_to_text(history)
 
         matched = (df["name"].astype(str) == name) & (df["birth_info"].astype(str) == birth)
         if matched.any():
             idx = df.index[matched][0]
-            df.loc[idx, ["report", "history", "date", "ptype"]] = [
+            if not int(df.loc[idx, "id"] or 0):
+                df.loc[idx, "id"] = int(df["id"].max()) + 1 if not df.empty else 1
+            df.loc[idx, ["name", "birth_info", "report", "history", "date", "ptype"]] = [
+                name,
+                birth,
                 str(report),
                 history_str,
                 date_now,
-                str(ptype),
+                ptype,
             ]
         else:
             next_id = int(df["id"].max()) + 1 if not df.empty else 1
@@ -498,7 +556,7 @@ def save_to_gsheets(name, birth, report, history, ptype="single"):
                                 "report": str(report),
                                 "history": history_str,
                                 "date": date_now,
-                                "ptype": str(ptype),
+                                "ptype": ptype,
                             }
                         ],
                         columns=RECORD_COLUMNS,
@@ -516,6 +574,11 @@ def save_to_gsheets(name, birth, report, history, ptype="single"):
 
 
 def save_record(name, birth, report, history, ptype="single"):
+    identity_error = validate_record_identity(name, birth, ptype)
+    if identity_error:
+        st.error(identity_error)
+        return False
+
     if save_to_gsheets(name, birth, report, history, ptype):
         return True
     return save_to_sqlite(name, birth, report, history, ptype)
@@ -640,13 +703,16 @@ with tab_single:
     focus_s = st.text_area("当前核心诉求 (Su consulta principal)", placeholder="例：2026年事业抉择、情感走向等", key="focus_s")
     
     if st.button("开始深度个人能量推演 (Iniciar Lectura Individual)"):
-        final_name = name_s
-        final_birth = birth_s
+        final_name, final_birth, final_ptype = normalize_record_identity(name_s, birth_s, "single")
+        identity_error = validate_record_identity(final_name, final_birth, final_ptype)
+        if identity_error:
+            st.error(identity_error)
+            st.stop()
+        set_current_record_identity(final_name, final_birth, final_ptype)
         # 诉求为空时，自动转为八字全面综合测算，绝不允许跑偏成星座占星
         focus_final_s = focus_s.strip() if focus_s.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理测算】，重点覆盖事业财富、感情婚姻、健康、2026流年走向，绝对围绕生辰八字展开。"
         user_payload = f"【单盘请求】姓名：{name_s}, 性别：{gender_s}, 生辰：{birth_s}, 出生地：{place_s}, 诉求：{focus_final_s}"
         chosen_prompt = PROMPT_SINGLE
-        st.session_state.current_prompt_type = "single"
 
 with tab_double:
     st.markdown("### 👤 对象 A (Persona A)")
@@ -670,8 +736,11 @@ with tab_double:
     focus_d = st.text_area("合盘核心诉求 (关系痛点/未来走向)", placeholder="例：两人是否适合合伙开店？两人的恋爱正缘缘分如何？", key="focus_d")
     
     if st.button("开始双人命运合盘推演 (Iniciar Sinastría)"):
-        final_name = f"{name_a} & {name_b}"
-        final_birth = f"A:{birth_a} | B:{birth_b}"
+        final_name, final_birth, final_ptype = normalize_record_identity(f"{name_a} & {name_b}", f"A:{birth_a} | B:{birth_b}", "double")
+        if not all([name_a.strip(), name_b.strip(), birth_a.strip(), birth_b.strip()]):
+            st.error("请至少填写双方姓名/代称和双方生辰信息，否则历史档案无法识别。")
+            st.stop()
+        set_current_record_identity(final_name, final_birth, final_ptype)
         # 诉求为空时，自动转为双人八字合盘综合测算，绝不允许跑偏成星座配对
         focus_final_d = focus_d.strip() if focus_d.strip() else "用户未指定具体问题，请基于两人八字四柱进行【全面综合合盘测算】，重点覆盖两人磁场契合度、感情婚姻走向、是否适合合伙、2026相处流年，绝对围绕双方生辰八字展开。"
         user_payload = (
@@ -681,7 +750,6 @@ with tab_double:
             f"合盘最核心诉求：{focus_final_d}"
         )
         chosen_prompt = PROMPT_DOUBLE
-        st.session_state.current_prompt_type = "double"
 
 with tab_bazi:
     st.markdown("#### 🀄 正统四柱排盘 · 依经典典籍论命")
@@ -699,8 +767,12 @@ with tab_bazi:
     focus_z = st.text_area("当前核心诉求 (Su consulta principal)", placeholder="例：2026年事业财运、正缘婚姻、健康等；留空则做全面综合论命", key="focus_z")
 
     if st.button("开始正统八字排盘论命 (Iniciar Bazi Clásico)"):
-        final_name = name_z
-        final_birth = solar_z if solar_z.strip() else lunar_z
+        final_name, final_birth, final_ptype = normalize_record_identity(name_z, solar_z if solar_z.strip() else lunar_z, "bazi")
+        identity_error = validate_record_identity(final_name, final_birth, final_ptype)
+        if identity_error:
+            st.error(identity_error)
+            st.stop()
+        set_current_record_identity(final_name, final_birth, final_ptype)
         focus_final_z = focus_z.strip() if focus_z.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理论命】，覆盖日主旺衰、格局用神、事业财富、感情婚姻、健康及2026流年，严格围绕生辰八字，禁止跑偏星座。"
         alive_note = "在世（请以当前系统日期为当前时间推算流年）" if alive_z == "在世" else "已故（流年只推算到去世年为止，去世年份请在诉求中补充）"
         user_payload = (
@@ -715,7 +787,6 @@ with tab_bazi:
             f"请严格按系统指令中的【排盘参考数据】排出四柱、藏干、十神、大运，再依经典典籍论命。"
         )
         chosen_prompt = PROMPT_BAZI
-        st.session_state.current_prompt_type = "bazi"
 
 # --- 7. 动态匹配执行与数据持久化 ---
 if user_payload and chosen_prompt:
@@ -725,8 +796,14 @@ if user_payload and chosen_prompt:
     else:
         active_key, active_url, active_model = api_key_full, base_url_full, model_full
 
-    if not active_key:
-        st.error("请先在侧边栏填入对应引擎的 API Key")
+    config_error = validate_api_config(
+        active_key,
+        active_url,
+        active_model,
+        "快速版" if is_live_mode else "完整版",
+    )
+    if config_error:
+        st.error(config_error)
     else:
         st.session_state.chat_history = []
         st.session_state.main_report = "" 
@@ -766,9 +843,16 @@ if user_payload and chosen_prompt:
                 st.session_state['last_name'] = final_name
                 st.session_state['last_birth'] = final_birth
                 
-                save_record(final_name, final_birth, current_full_text, st.session_state.chat_history, st.session_state.current_prompt_type)
-                st.success("推演报告已成功保存。")
-                st.rerun()
+                saved = save_record(
+                    st.session_state.last_name,
+                    st.session_state.last_birth,
+                    current_full_text,
+                    st.session_state.chat_history,
+                    st.session_state.current_prompt_type,
+                )
+                if saved:
+                    st.success("推演报告已成功保存。")
+                    st.rerun()
 
         except Exception as e:
             st.error(f"推演错误：{e}")
@@ -794,6 +878,11 @@ if st.session_state.main_report:
 
     if submit_follow_up and user_question:
         # 追问统一走【完整版深度引擎】，保证细挖深度
+        config_error = validate_api_config(api_key_full, base_url_full, model_full, "完整版")
+        if config_error:
+            st.error(config_error)
+            st.stop()
+
         client = OpenAI(api_key=api_key_full, base_url=base_url_full, timeout=600.0)
         if st.session_state.current_prompt_type == "double":
             active_prompt = PROMPT_DOUBLE
@@ -824,7 +913,14 @@ if st.session_state.main_report:
                 new_answer = resp.choices[0].message.content
                 st.session_state.chat_history.append({"question": user_question, "answer": new_answer})
                 
-                save_record(st.session_state.get('last_name', 'Cloud_User'), st.session_state.get('last_birth', 'Cloud_Birth'), st.session_state.main_report, st.session_state.chat_history, st.session_state.current_prompt_type)
-                st.rerun()
+                saved = save_record(
+                    st.session_state.get('last_name', ''),
+                    st.session_state.get('last_birth', ''),
+                    st.session_state.main_report,
+                    st.session_state.chat_history,
+                    st.session_state.current_prompt_type,
+                )
+                if saved:
+                    st.rerun()
         except Exception as e:
             st.error(f"追问失败：{e}")
