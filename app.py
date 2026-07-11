@@ -2,10 +2,16 @@ import ast
 import datetime
 import json
 import os
+import re
 import sqlite3
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
+
+try:
+    from lunar_python import Solar
+except ImportError:
+    Solar = None
 
 try:
     from streamlit_gsheets import GSheetsConnection
@@ -73,7 +79,7 @@ PROMPT_SINGLE = """
 ### A. 定盘与排盘
 - **绝对信任输入**: 忽略自动换算，直接读取用户提供的四柱干支。
 - **真太阳时校准**: 若用户提供出生地，需在后台微调起运时间。
-- **南北半球校准**: 若用户提供的出生地在南美洲，那么需要根据地理气候进行调整，比如12月在北半球是冬天，但是在南半球是夏天
+- **出生地边界**: 出生地只用于真太阳时和时区复核参考；传统四柱月令仍以节气为准，绝不因南北半球气候差异擅自改月令旺衰。
 
 ### B. 能量量化计算
 - **静态权重**: 天干各36分；月令本气70分，其他地支本气40分；藏干中气15分，余气10分。
@@ -373,6 +379,140 @@ def set_current_record_identity(name, birth, ptype):
     st.session_state.last_name = name
     st.session_state.last_birth = birth
     st.session_state.current_prompt_type = ptype
+
+
+def parse_solar_birth_datetime(raw):
+    raw = str(raw or "").strip()
+    if not raw:
+        return None
+
+    text = (
+        raw.replace("年", "-")
+        .replace("月", "-")
+        .replace("日", " ")
+        .replace("/", "-")
+        .replace(".", "-")
+        .replace("：", ":")
+        .strip()
+    )
+
+    compact = re.match(
+        r"^\s*(\d{4})(\d{2})(\d{2})(?:\s*(\d{1,2})(?::?(\d{2}))?)?\s*$",
+        raw,
+    )
+    dashed = re.match(
+        r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2})(?::(\d{1,2}))?)?\s*$",
+        text,
+    )
+    match = compact or dashed
+    if not match:
+        return None
+
+    year, month, day = [int(match.group(i)) for i in range(1, 4)]
+    has_time = match.group(4) is not None
+    hour = int(match.group(4)) if has_time else 12
+    minute = int(match.group(5) or 0) if has_time else 0
+
+    try:
+        datetime.datetime(year, month, day, hour, minute)
+    except ValueError:
+        return None
+
+    return {
+        "year": year,
+        "month": month,
+        "day": day,
+        "hour": hour,
+        "minute": minute,
+        "has_time": has_time,
+    }
+
+
+def format_hide_gan(values):
+    if not values:
+        return "无"
+    return "、".join([str(v) for v in values if str(v).strip()]) or "无"
+
+
+def build_bazi_precheck(name, gender, birth, place="", label="命主"):
+    if Solar is None:
+        return "【程序排盘预校验】未启用：缺少 lunar-python 依赖。请检查 requirements.txt 是否已包含 lunar-python==1.4.8。"
+
+    parsed = parse_solar_birth_datetime(birth)
+    if not parsed:
+        return (
+            "【程序排盘预校验】未启用：当前生辰格式无法被程序稳定识别。\n"
+            "请优先让用户填写阳历格式，如 1988-05-17 08:30 或 19880517 0830。\n"
+            "在未取得确定四柱前，不得凭空臆造年柱、月柱、日柱、时柱、大运起运岁数。"
+        )
+
+    solar = Solar.fromYmdHms(
+        parsed["year"],
+        parsed["month"],
+        parsed["day"],
+        parsed["hour"],
+        parsed["minute"],
+        0,
+    )
+    lunar = solar.getLunar()
+    eight_char = lunar.getEightChar()
+    gender_value = 1 if "男" in str(gender) or "Hombre" in str(gender) else 0
+    yun = eight_char.getYun(gender_value)
+
+    pillars = [
+        ("年柱", eight_char.getYear(), eight_char.getYearShiShenGan(), eight_char.getYearHideGan(), eight_char.getYearNaYin(), eight_char.getYearXunKong()),
+        ("月柱", eight_char.getMonth(), eight_char.getMonthShiShenGan(), eight_char.getMonthHideGan(), eight_char.getMonthNaYin(), eight_char.getMonthXunKong()),
+        ("日柱", eight_char.getDay(), "日主", eight_char.getDayHideGan(), eight_char.getDayNaYin(), eight_char.getDayXunKong()),
+    ]
+    if parsed["has_time"]:
+        pillars.append(("时柱", eight_char.getTime(), eight_char.getTimeShiShenGan(), eight_char.getTimeHideGan(), eight_char.getTimeNaYin(), eight_char.getTimeXunKong()))
+
+    pillar_lines = []
+    for title, ganzhi, shishen, hide_gan, nayin, xunkong in pillars:
+        pillar_lines.append(f"- {title}：{ganzhi}｜十神：{shishen}｜藏干：{format_hide_gan(hide_gan)}｜纳音：{nayin}｜旬空：{xunkong}")
+
+    dayun_lines = []
+    for dayun in yun.getDaYun()[:9]:
+        ganzhi = dayun.getGanZhi()
+        if not ganzhi:
+            ganzhi = "起运前小运"
+        dayun_lines.append(
+            f"- {dayun.getStartAge()}-{dayun.getEndAge()}岁（{dayun.getStartYear()}-{dayun.getEndYear()}）：{ganzhi}"
+        )
+
+    time_note = (
+        f"{parsed['hour']:02d}:{parsed['minute']:02d}"
+        if parsed["has_time"]
+        else "未提供具体时辰；程序仅预排年月日三柱，时柱请标未知，不得强推"
+    )
+
+    return f"""【程序排盘预校验｜{label}】
+姓名/代称：{name or label}
+输入生辰：{birth}
+识别为阳历：{parsed['year']:04d}-{parsed['month']:02d}-{parsed['day']:02d} {time_note}
+出生地：{place or "未提供"}（提示：当前程序尚未做经纬度真太阳时校正；若出生时间接近时辰交界，需人工复核）
+性别：{gender}
+农历：{lunar}
+四柱：{eight_char}
+日主：{eight_char.getDayGan()}
+胎元：{eight_char.getTaiYuan()}｜命宫：{eight_char.getMingGong()}｜身宫：{eight_char.getShenGong()}
+大运方向：{"顺排" if yun.isForward() else "逆排"}
+起运：{yun.getStartYear()}年{yun.getStartMonth()}个月{yun.getStartDay()}天{yun.getStartHour()}小时
+
+四柱明细：
+{chr(10).join(pillar_lines)}
+
+大运预排：
+{chr(10).join(dayun_lines)}
+
+【模型约束】
+以上四柱与大运为程序确定性预排结果。分析时必须以此为准；如与自行推算不一致，以程序预排为准，并仅提示用户在节气交界、时辰交界或真太阳时情况下需人工复核。
+"""
+
+
+def join_prechecks(*items):
+    prechecks = [item for item in items if item]
+    return "\n\n".join(prechecks)
 
 
 def get_gsheets_worksheet():
@@ -711,7 +851,8 @@ with tab_single:
         set_current_record_identity(final_name, final_birth, final_ptype)
         # 诉求为空时，自动转为八字全面综合测算，绝不允许跑偏成星座占星
         focus_final_s = focus_s.strip() if focus_s.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理测算】，重点覆盖事业财富、感情婚姻、健康、2026流年走向，绝对围绕生辰八字展开。"
-        user_payload = f"【单盘请求】姓名：{name_s}, 性别：{gender_s}, 生辰：{birth_s}, 出生地：{place_s}, 诉求：{focus_final_s}"
+        bazi_precheck = build_bazi_precheck(final_name, gender_s, final_birth, place_s, "个人单盘")
+        user_payload = f"{bazi_precheck}\n\n【单盘请求】姓名：{final_name}, 性别：{gender_s}, 生辰：{final_birth}, 出生地：{place_s}, 诉求：{focus_final_s}"
         chosen_prompt = PROMPT_SINGLE
 
 with tab_double:
@@ -741,9 +882,14 @@ with tab_double:
             st.error("请至少填写双方姓名/代称和双方生辰信息，否则历史档案无法识别。")
             st.stop()
         set_current_record_identity(final_name, final_birth, final_ptype)
+        bazi_precheck = join_prechecks(
+            build_bazi_precheck(name_a, gender_a, birth_a, place_a, "对象A"),
+            build_bazi_precheck(name_b, gender_b, birth_b, place_b, "对象B"),
+        )
         # 诉求为空时，自动转为双人八字合盘综合测算，绝不允许跑偏成星座配对
         focus_final_d = focus_d.strip() if focus_d.strip() else "用户未指定具体问题，请基于两人八字四柱进行【全面综合合盘测算】，重点覆盖两人磁场契合度、感情婚姻走向、是否适合合伙、2026相处流年，绝对围绕双方生辰八字展开。"
         user_payload = (
+            f"{bazi_precheck}\n\n"
             f"【合盘请求】\n"
             f"对象A：姓名 {name_a}, 性别 {gender_a}, 生辰 {birth_a}, 出生地 {place_a}\n"
             f"对象B：姓名 {name_b}, 性别 {gender_b}, 生辰 {birth_b}, 出生地 {place_b}\n"
@@ -775,7 +921,9 @@ with tab_bazi:
         set_current_record_identity(final_name, final_birth, final_ptype)
         focus_final_z = focus_z.strip() if focus_z.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理论命】，覆盖日主旺衰、格局用神、事业财富、感情婚姻、健康及2026流年，严格围绕生辰八字，禁止跑偏星座。"
         alive_note = "在世（请以当前系统日期为当前时间推算流年）" if alive_z == "在世" else "已故（流年只推算到去世年为止，去世年份请在诉求中补充）"
+        bazi_precheck = build_bazi_precheck(final_name, gender_z, solar_z if solar_z.strip() else lunar_z, place_z, "传统八字")
         user_payload = (
+            f"{bazi_precheck}\n\n"
             f"【中国传统八字排盘请求】\n"
             f"姓名：{name_z}\n"
             f"性别：{gender_z}\n"

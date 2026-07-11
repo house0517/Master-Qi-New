@@ -2,3 +2,4 @@ streamlit
 openai
 st-gsheets-connection
 pandas
+lunar-python==1.4.8
