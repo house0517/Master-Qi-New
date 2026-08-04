@@ -204,6 +204,15 @@ _BAZI_INJECT_NOTE = """
 PROMPT_SINGLE = PROMPT_SINGLE + _BAZI_INJECT_NOTE
 PROMPT_DOUBLE = PROMPT_DOUBLE + _BAZI_INJECT_NOTE
 
+PROMPT_BRACELET = PROMPT_SINGLE + """
+
+## 【直播手串推荐专用补充】
+- 本模式不是完整命理报告，而是“八字快速判断 + 水晶手串推荐”的直播口播工具。
+- 输出重点是先讲命盘状态，再自然过渡到适合佩戴的配饰方向，最后落到可展示的手串。
+- 健康不作为手串推荐维度；手串只围绕事业、财富、感情、稳定防护、表达人气、综合提升来推荐。
+- 不得承诺手串可以保证发财、复合、转运或治疗疾病，只能作为能量提醒和佩戴方向。
+"""
+
 
 # ==========================================
 # --- 2C. 中国传统算法系统指令 (PROMPT_BAZI) ---
@@ -825,7 +834,7 @@ with st.sidebar:
 
                     # 优先用存储的 ptype 还原类型，老档案无 ptype 则按名字兜底判断
                     saved_ptype = res.get("ptype") or None
-                    if saved_ptype in ("single", "double", "bazi"):
+                    if saved_ptype in ("single", "double", "bazi", "bracelet"):
                         st.session_state.current_prompt_type = saved_ptype
                     elif "&" in str(res.get("name", "")):
                         st.session_state.current_prompt_type = "double"
@@ -839,10 +848,11 @@ with st.sidebar:
 # --- 6. 主界面 ---
 st.title("🕯️ Maestro Qi: Alquimia de Destino")
 
-tab_single, tab_double, tab_bazi = st.tabs([
+tab_single, tab_double, tab_bazi, tab_bracelet = st.tabs([
     "👤 个人能量推演 (Lectura Individual)",
     "💞 双人命运合盘 (Sinastría de Destino)",
-    "🀄 中国传统算法 (Bazi Clásico)"
+    "🀄 中国传统算法 (Bazi Clásico)",
+    "📿 直播手串推荐"
 ])
 
 final_name = ""
@@ -954,10 +964,56 @@ with tab_bazi:
         )
         chosen_prompt = PROMPT_BAZI
 
+with tab_bracelet:
+    st.markdown("#### 📿 八字配饰推荐 · 直播口播专用")
+    st.caption("先用八字判断状态，再推荐适合展示的水晶手串方向。健康不作为手串推荐维度。")
+
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        name_r = st.text_input("姓名/代称", key="name_r")
+        gender_r = st.radio("性别", ["女 (Mujer)", "男 (Hombre)"], horizontal=True, key="gen_r")
+        bracelet_focus = st.selectbox(
+            "本次推荐重点",
+            ["综合提升", "事业财富", "感情关系", "稳定防护", "表达人气"],
+            key="bracelet_focus",
+        )
+    with col_r2:
+        birth_r = st.text_input("生辰信息 (Ej: 1988-05-17，可选 08:30)", key="birth_r")
+        place_r = st.text_input("出生城市", key="place_r")
+
+    focus_r = st.text_area(
+        "直播间补充信息/当前问题",
+        placeholder="例：想看事业财运、最近感情反复、想提升人气和成交等；可留空",
+        key="focus_r",
+    )
+
+    if st.button("生成直播手串推荐话术"):
+        final_name, final_birth, final_ptype = normalize_record_identity(name_r, birth_r, "bracelet")
+        identity_error = validate_record_identity(final_name, final_birth, final_ptype)
+        if identity_error:
+            st.error(identity_error)
+            st.stop()
+        set_current_record_identity(final_name, final_birth, final_ptype)
+        focus_final_r = focus_r.strip() if focus_r.strip() else "用户未补充具体问题，请基于八字状态做直播手串推荐，重点围绕事业、财富、感情、稳定防护或综合提升给出初步佩戴方向。"
+        bazi_precheck = build_bazi_precheck(final_name, gender_r, final_birth, place_r, "直播手串推荐")
+        user_payload = (
+            f"{bazi_precheck}\n\n"
+            f"【直播手串推荐请求】\n"
+            f"姓名：{final_name}\n"
+            f"性别：{gender_r}\n"
+            f"生辰：{final_birth}\n"
+            f"出生地：{place_r}\n"
+            f"推荐重点：{bracelet_focus}\n"
+            f"补充信息：{focus_final_r}\n"
+            f"请生成适合主播照着念的中文直播手串推荐口播稿。"
+        )
+        chosen_prompt = PROMPT_BRACELET
+
 # --- 7. 动态匹配执行与数据持久化 ---
 if user_payload and chosen_prompt:
     # 根据直播开关，选择对应引擎的 Key / URL / 模型
-    if is_live_mode:
+    is_bracelet_request = st.session_state.current_prompt_type == "bracelet"
+    if is_live_mode or is_bracelet_request:
         active_key, active_url, active_model = api_key_live, base_url_live, model_live
     else:
         active_key, active_url, active_model = api_key_full, base_url_full, model_full
@@ -966,7 +1022,7 @@ if user_payload and chosen_prompt:
         active_key,
         active_url,
         active_model,
-        "快速版" if is_live_mode else "完整版",
+        "快速版" if (is_live_mode or is_bracelet_request) else "完整版",
     )
     if config_error:
         st.error(config_error)
@@ -975,8 +1031,80 @@ if user_payload and chosen_prompt:
         st.session_state.main_report = "" 
         
         # 动态拼接直播间模式附加指令
-        if is_live_mode:
-            if is_live_talk_mode:
+        if is_live_mode or is_bracelet_request:
+            if is_bracelet_request:
+                live_constraint = """
+
+⚠️【重要提醒：直播手串推荐模式】：
+当前只输出中文直播口播稿，严禁输出 PARTE I/II/III/IV，严禁输出完整深度报告。
+
+【核心定位】
+- 这是“八字快速分析 + 水晶手串推荐 + 主播展示话术”，不是八字教学。
+- 先分析八字状态，再说适合佩戴什么类型的配饰，最后落到具体手串展示。
+- 健康不要作为手串推荐维度，不要写健康建议。
+- 少讲术语，最多出现 1-2 个八字词；出现后立刻转成现实判断。
+- 不要在开头输出出生时辰不足的技术说明；如果需要更细，只在事业、财富、感情节点处自然引导私信补具体出生时间。
+
+【输出要求】
+只输出一个标题：
+### 📿 直播手串推荐口播
+
+正文 500-800 字，60-90 秒左右，一句话一段，适合主播照着念。
+
+必须按这个顺序自然展开：
+1. 先给八字总判断：这个人当前最适合强化哪一种能量。
+2. 讲事业/财富/感情/稳定防护中最相关的 2-3 个维度，不讲健康。
+3. 过渡到“所以她适合佩戴的配饰不是随便选，而是要选能帮她稳定/招引/筛选/柔和/提升的类型”。
+4. 插入展示句：必须写“主播此处拿出手串展示：”
+5. 推荐 1 条主手串，可以说明 1-3 种材质组合，但不要推荐一堆。
+6. 解释每个材质只讲现实意义，不讲玄乎功效。
+7. 在事业、财富或感情后放 1 句私信引导：如果要看 2026-2027 具体月份该做什么、该规避什么，需要补具体出生时间私信我。
+8. 手串结尾必须说明：直播里只能先给方向，真正定制还要看完整八字和具体出生时间。
+
+【推荐方向】
+- 事业财富：优先财富能量手串，如黄虎眼、黄阿赛，可搭配稳定型茶水晶。
+- 感情关系：优先爱情能量手串，如冰粉、珍珠，强调柔和表达和选择稳定关系。
+- 稳定防护：优先纯净/防护方向，如白幽灵、黑发晶、茶水晶。
+- 表达人气：可偏向黄虎眼、白幽灵或多宝，强调展示力、行动力和筛选机会。
+- 综合提升：优先多宝，或“白幽灵 + 茶水晶 + 黄虎眼”这类平衡组合。
+
+【禁止】
+- 禁止说戴了就发财、转运、复合、挡灾。
+- 禁止把手串说成治疗健康问题。
+- 禁止长篇解释五行十神。
+- 禁止结尾只写泛泛“想知道更多私信我”。
+- 禁止所有人都推荐同一条。
+
+【示范风格】
+这位朋友我先看八字状态。
+
+她不是单纯缺机会，而是需要把机会筛选出来，再把能变现的方向稳定住。
+
+事业上，她适合做有主动权、有表达空间、能靠个人能力转化结果的事情。
+
+财富上，她不能只看哪里热闹就往哪里冲，越是机会多，越要先抓一个能持续变现的方向。
+
+如果她要看 2026 到 2027 哪几个月适合冲事业、哪几个月要守财，这个需要补具体出生时间私信我，我才能看得更细。
+
+所以从配饰方向看，她不适合一上来就戴特别冲的招财款。
+
+她更适合先稳住判断力，再加强财富行动力。
+
+主播此处拿出手串展示：
+
+比如这一条，我会偏向白幽灵、茶水晶、黄虎眼这一类组合。
+
+白幽灵代表先把杂乱的人和事清掉，不要什么机会都接。
+
+茶水晶偏稳定，适合帮她在选择面前慢一点、稳一点。
+
+黄虎眼走财富和行动力方向，适合把注意力放在真正能成交、能落地的事情上。
+
+所以这条不是单纯招财，而是稳定财富型。
+
+直播里我只能先给一个方向，真正要定到最适合她的手串，还是要看完整八字和具体出生时间。
+"""
+            elif is_live_talk_mode:
                 live_constraint = """
 
 ⚠️【重要提醒：直播讲解模式｜自然互动口播】：
@@ -1095,7 +1223,9 @@ if user_payload and chosen_prompt:
         current_full_text = ""
         
         try:
-            if is_live_mode and is_live_talk_mode:
+            if is_bracelet_request:
+                spinner_msg = "齐大师正在生成直播手串推荐话术..."
+            elif is_live_mode and is_live_talk_mode:
                 spinner_msg = "齐大师正在生成直播自然口播稿..."
             else:
                 spinner_msg = "齐大师正在快速点评..." if is_live_mode else "齐大师正在调动命理能量磁场，深度推演中..."
@@ -1167,6 +1297,8 @@ if st.session_state.main_report:
             active_prompt = PROMPT_DOUBLE
         elif st.session_state.current_prompt_type == "bazi":
             active_prompt = PROMPT_BAZI
+        elif st.session_state.current_prompt_type == "bracelet":
+            active_prompt = PROMPT_BRACELET
         else:
             active_prompt = PROMPT_SINGLE
         
