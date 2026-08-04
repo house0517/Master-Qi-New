@@ -213,6 +213,39 @@ PROMPT_BRACELET = PROMPT_SINGLE + """
 - 不得承诺手串可以保证发财、复合、转运或治疗疾病，只能作为能量提醒和佩戴方向。
 """
 
+PROMPT_FENGSHUI_LIVE = """
+# System Instruction: Maestro Qi - 直播风水知识开场脚本
+
+## 角色
+你是面向拉美西语直播间的东方风水知识主播。
+你的任务不是给个人测算，而是在开播前 30 秒用一个公共风水知识点快速留住陌生观众。
+
+## 核心原则
+- 不要问出生年月，不要讲八字，不要讲复杂流程。
+- 陌生用户进入后，必须在 5 秒内听懂今天直播在讲什么。
+- 先给价值，再互动；先讲一个所有人都能检查的家居风水点，再引导观众留言或私信。
+- 语气要像直播开场，不像文章、课程或长报告。
+- 内容必须适合拉美用户听懂，例子要生活化：家门、镜子、厨房、卧室、沙发、杂物、光线、财位、办公桌。
+- 不做恐吓，不说“必破财、必倒霉、一定影响婚姻”等绝对话术。
+
+## 输出语言
+- 主体必须是西语。
+- 每句西语后可附一行简短中文提示，方便主播理解，但不要把中文写得比西语长。
+- 如果用户要求只要西语，则只输出西语。
+
+## 前 30 秒结构
+1. 第 1 句必须是强开场，5 秒内讲清主题。
+2. 立即给第一条公共知识，不要先问问题。
+3. 讲 2-3 个可检查细节。
+4. 给一个很简单的现场互动：让观众看家里某个位置，留言“sí/no”或一个关键词。
+5. 最后自然引导：如果想看自己家门、卧室、厨房或财位，可以私信发平面图/照片。
+
+## 开场示范
+Mira la entrada de tu casa. Hay tres cosas que pueden bloquear la energía del hogar. Hoy te enseñaré cómo identificarlas.
+
+看你家的入口。有三件事可能挡住家里的能量。今天我教你怎么自己判断。
+"""
+
 
 # ==========================================
 # --- 2C. 中国传统算法系统指令 (PROMPT_BAZI) ---
@@ -834,7 +867,7 @@ with st.sidebar:
 
                     # 优先用存储的 ptype 还原类型，老档案无 ptype 则按名字兜底判断
                     saved_ptype = res.get("ptype") or None
-                    if saved_ptype in ("single", "double", "bazi", "bracelet"):
+                    if saved_ptype in ("single", "double", "bazi", "bracelet", "fengshui"):
                         st.session_state.current_prompt_type = saved_ptype
                     elif "&" in str(res.get("name", "")):
                         st.session_state.current_prompt_type = "double"
@@ -848,11 +881,12 @@ with st.sidebar:
 # --- 6. 主界面 ---
 st.title("🕯️ Maestro Qi: Alquimia de Destino")
 
-tab_single, tab_double, tab_bazi, tab_bracelet = st.tabs([
+tab_single, tab_double, tab_bazi, tab_bracelet, tab_fengshui = st.tabs([
     "👤 个人能量推演 (Lectura Individual)",
     "💞 双人命运合盘 (Sinastría de Destino)",
     "🀄 中国传统算法 (Bazi Clásico)",
-    "📿 直播手串推荐"
+    "📿 直播手串推荐",
+    "🏠 直播风水开场"
 ])
 
 final_name = ""
@@ -1009,11 +1043,65 @@ with tab_bracelet:
         )
         chosen_prompt = PROMPT_BRACELET
 
+with tab_fengshui:
+    st.markdown("#### 🏠 风水知识普及 · 开播前 30 秒")
+    st.caption("不问出生年月，先给陌生观众一个能马上听懂、马上检查的家居风水知识点。")
+
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        fengshui_topic = st.selectbox(
+            "今日风水主题",
+            ["家门入口", "客厅财位", "镜子摆放", "卧室睡眠", "厨房炉灶", "沙发靠山", "杂物堆积", "办公桌事业位"],
+            key="fengshui_topic",
+        )
+        fengshui_goal = st.selectbox(
+            "直播目标",
+            ["留住新观众", "引导评论互动", "引导私信看户型/照片", "过渡到个人风水咨询"],
+            key="fengshui_goal",
+        )
+    with col_f2:
+        fengshui_lang = st.selectbox(
+            "输出语言",
+            ["西语为主 + 中文提示", "只输出西语", "中文试讲版"],
+            key="fengshui_lang",
+        )
+        fengshui_duration = st.selectbox(
+            "脚本时长",
+            ["前30秒", "60秒扩展版"],
+            key="fengshui_duration",
+        )
+
+    fengshui_extra = st.text_area(
+        "补充要求",
+        placeholder="例：开头必须讲家门；适合 TikTok 新人进入；最后引导私信发户型图；可留空",
+        key="fengshui_extra",
+    )
+
+    if st.button("生成直播风水开场话术"):
+        now_label = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        final_name, final_birth, final_ptype = normalize_record_identity(
+            f"风水开场-{fengshui_topic}",
+            f"{fengshui_duration} | {now_label}",
+            "fengshui",
+        )
+        set_current_record_identity(final_name, final_birth, final_ptype)
+        user_payload = (
+            "【直播风水开场请求】\n"
+            f"主题：{fengshui_topic}\n"
+            f"直播目标：{fengshui_goal}\n"
+            f"输出语言：{fengshui_lang}\n"
+            f"脚本时长：{fengshui_duration}\n"
+            f"补充要求：{fengshui_extra.strip() if fengshui_extra.strip() else '无'}\n"
+            "请生成适合开播时直接念的风水知识普及脚本。"
+        )
+        chosen_prompt = PROMPT_FENGSHUI_LIVE
+
 # --- 7. 动态匹配执行与数据持久化 ---
 if user_payload and chosen_prompt:
     # 根据直播开关，选择对应引擎的 Key / URL / 模型
     is_bracelet_request = st.session_state.current_prompt_type == "bracelet"
-    if is_live_mode or is_bracelet_request:
+    is_fengshui_request = st.session_state.current_prompt_type == "fengshui"
+    if is_live_mode or is_bracelet_request or is_fengshui_request:
         active_key, active_url, active_model = api_key_live, base_url_live, model_live
     else:
         active_key, active_url, active_model = api_key_full, base_url_full, model_full
@@ -1022,7 +1110,7 @@ if user_payload and chosen_prompt:
         active_key,
         active_url,
         active_model,
-        "快速版" if (is_live_mode or is_bracelet_request) else "完整版",
+        "快速版" if (is_live_mode or is_bracelet_request or is_fengshui_request) else "完整版",
     )
     if config_error:
         st.error(config_error)
@@ -1031,8 +1119,46 @@ if user_payload and chosen_prompt:
         st.session_state.main_report = "" 
         
         # 动态拼接直播间模式附加指令
-        if is_live_mode or is_bracelet_request:
-            if is_bracelet_request:
+        if is_live_mode or is_bracelet_request or is_fengshui_request:
+            if is_fengshui_request:
+                live_constraint = """
+
+⚠️【重要提醒：直播风水开场模式】：
+当前只输出开播前风水知识脚本，不问出生年月，不做八字测算，不输出 PARTE I/II/III/IV。
+
+【前30秒硬规则】
+- 第一句必须让陌生用户在 5 秒内听懂今天讲什么。
+- 不要先问问题，不要解释流程，不要说“欢迎来到直播间”超过一句。
+- 必须立即给第一条公共风水知识，让新人先获得价值。
+- 如果主题是家门入口，优先使用或改写这个西语开场：
+  Mira la entrada de tu casa. Hay tres cosas que pueden bloquear la energía del hogar. Hoy te enseñaré cómo identificarlas.
+- 如果主题不是家门入口，也要使用同样节奏：先点名家中具体位置，再说今天教观众识别什么问题。
+
+【内容结构】
+只输出一个标题：
+### 🏠 Apertura de Feng Shui para Live
+
+然后按以下结构输出：
+【Apertura en español】
+给主播可直接念的西语脚本。前 30 秒版本控制在 90-130 个西语词；60 秒扩展版控制在 150-220 个西语词。
+
+【中文提示】
+用 3-5 条中文短句解释主播应该怎么展示或指哪里。
+
+【互动句】
+给 1 句西语互动句，必须是让观众检查家里某个地方并留言 sí/no 或关键词。
+
+【私信引导】
+给 1 句西语私信引导：如果想看自己家门、卧室、厨房或财位，可以私信发照片/户型图。
+
+【禁止】
+- 禁止恐吓观众。
+- 禁止讲八字、生肖、出生时间。
+- 禁止长篇解释风水理论。
+- 禁止先问“你家怎么样”，必须先给知识。
+- 禁止说保证发财、保证转运。
+"""
+            elif is_bracelet_request:
                 live_constraint = """
 
 ⚠️【重要提醒：直播手串推荐模式】：
@@ -1223,7 +1349,9 @@ if user_payload and chosen_prompt:
         current_full_text = ""
         
         try:
-            if is_bracelet_request:
+            if is_fengshui_request:
+                spinner_msg = "齐大师正在生成直播风水开场话术..."
+            elif is_bracelet_request:
                 spinner_msg = "齐大师正在生成直播手串推荐话术..."
             elif is_live_mode and is_live_talk_mode:
                 spinner_msg = "齐大师正在生成直播自然口播稿..."
@@ -1299,11 +1427,20 @@ if st.session_state.main_report:
             active_prompt = PROMPT_BAZI
         elif st.session_state.current_prompt_type == "bracelet":
             active_prompt = PROMPT_BRACELET
+        elif st.session_state.current_prompt_type == "fengshui":
+            active_prompt = PROMPT_FENGSHUI_LIVE
         else:
             active_prompt = PROMPT_SINGLE
         
+        if st.session_state.current_prompt_type == "fengshui":
+            follow_up_constraint = "\n\n⚠️【追问约束】：继续围绕直播风水知识普及来回答，不要切回八字测算；保持西语直播话术为主，必要时附中文提示。"
+        elif st.session_state.current_prompt_type == "bracelet":
+            follow_up_constraint = "\n\n⚠️【追问约束】：继续围绕八字手串推荐来回答，必须继承主报告中已经给出的手串方向，绝对禁止前后矛盾。"
+        else:
+            follow_up_constraint = "\n\n⚠️【严厉约束】：在回答后续追问时，你必须严格继承主报告中已经给出的所有测算结论和特定手串推荐方案，绝对禁止前后矛盾！"
+
         messages = [
-            {"role": "system", "content": active_prompt + "\n\n⚠️【严厉约束】：在回答后续追问时，你必须严格继承主报告中已经给出的所有测算结论和特定手串推荐方案，绝对禁止前后矛盾！"},
+            {"role": "system", "content": active_prompt + follow_up_constraint},
             {"role": "assistant", "content": st.session_state.main_report}
         ]
         for chat in st.session_state.chat_history:
