@@ -852,31 +852,46 @@ with st.sidebar:
     history_list = load_records()
 
     if history_list:
-        options = {
-            f"{row.get('name', '')} (生日: {row.get('birth_info', '')}) [{row.get('date', '')}]": row.get("id")
-            for row in history_list
-        }
-        selected_label = st.selectbox("调取历史档案", ["-- 请选择 --"] + list(options.keys()))
-        
-        if selected_label != "-- 请选择 --":
-            if st.button("一键加载档案"):
-                record_id = options[selected_label]
-                res = load_record_by_id(record_id)
+        search_name = st.text_input(
+            "按人名搜索档案",
+            placeholder="输入姓名或代称关键词",
+            key="archive_name_search",
+        ).strip().lower()
+        filtered_history = [
+            row for row in history_list
+            if not search_name or search_name in str(row.get("name", "")).lower()
+        ]
+        if search_name:
+            st.caption(f"搜索结果：{len(filtered_history)} / {len(history_list)} 条")
 
-                if res:
-                    st.session_state.main_report = res.get("report", "")
-                    st.session_state.chat_history = history_from_text(res.get("history", ""))
+        if not filtered_history:
+            st.info("没有找到匹配的人名档案。")
+        else:
+            options = {
+                f"{row.get('name', '')} (生日: {row.get('birth_info', '')}) [{row.get('date', '')}]": row.get("id")
+                for row in filtered_history
+            }
+            selected_label = st.selectbox("调取历史档案", ["-- 请选择 --"] + list(options.keys()))
+            
+            if selected_label != "-- 请选择 --":
+                if st.button("一键加载档案"):
+                    record_id = options[selected_label]
+                    res = load_record_by_id(record_id)
 
-                    # 优先用存储的 ptype 还原类型，老档案无 ptype 则按名字兜底判断
-                    saved_ptype = res.get("ptype") or None
-                    if saved_ptype in ("single", "double", "bazi", "bracelet", "fengshui"):
-                        st.session_state.current_prompt_type = saved_ptype
-                    elif "&" in str(res.get("name", "")):
-                        st.session_state.current_prompt_type = "double"
-                    else:
-                        st.session_state.current_prompt_type = "single"
-                    st.success(f"已恢复档案")
-                    st.rerun()
+                    if res:
+                        st.session_state.main_report = res.get("report", "")
+                        st.session_state.chat_history = history_from_text(res.get("history", ""))
+
+                        # 优先用存储的 ptype 还原类型，老档案无 ptype 则按名字兜底判断
+                        saved_ptype = res.get("ptype") or None
+                        if saved_ptype in ("single", "double", "bazi", "bracelet", "fengshui"):
+                            st.session_state.current_prompt_type = saved_ptype
+                        elif "&" in str(res.get("name", "")):
+                            st.session_state.current_prompt_type = "double"
+                        else:
+                            st.session_state.current_prompt_type = "single"
+                        st.success(f"已恢复档案")
+                        st.rerun()
     else:
         st.caption("💡 暂无历史测算档案。")
 
