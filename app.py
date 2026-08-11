@@ -687,6 +687,26 @@ def load_record_by_id(record_id):
     return None
 
 
+def restore_record_to_session(record):
+    if not record:
+        return False
+
+    st.session_state.main_report = record.get("report", "")
+    st.session_state.chat_history = history_from_text(record.get("history", ""))
+    st.session_state.last_name = str(record.get("name", "") or "")
+    st.session_state.last_birth = str(record.get("birth_info", "") or "")
+
+    saved_ptype = record.get("ptype") or None
+    if saved_ptype in ("single", "double", "bazi", "bracelet", "fengshui"):
+        st.session_state.current_prompt_type = saved_ptype
+    elif "&" in st.session_state.last_name:
+        st.session_state.current_prompt_type = "double"
+    else:
+        st.session_state.current_prompt_type = "single"
+
+    return True
+
+
 def save_to_sqlite(name, birth, report, history, ptype="single"):
     try:
         conn = sqlite3.connect(LOCAL_DB_PATH)
@@ -867,31 +887,27 @@ with st.sidebar:
         if not filtered_history:
             st.info("没有找到匹配的人名档案。")
         else:
-            options = {
-                f"{row.get('name', '')} (生日: {row.get('birth_info', '')}) [{row.get('date', '')}]": row.get("id")
+            record_options = {
+                f"{row.get('name', '')} (生日: {row.get('birth_info', '')}) [{row.get('date', '')}]": row
                 for row in filtered_history
             }
-            selected_label = st.selectbox("调取历史档案", ["-- 请选择 --"] + list(options.keys()))
+            selected_label = st.selectbox(
+                "选择要调出的历史档案",
+                ["-- 请选择 --"] + list(record_options.keys()),
+                key="archive_record_select",
+            )
             
             if selected_label != "-- 请选择 --":
-                if st.button("一键加载档案"):
-                    record_id = options[selected_label]
-                    res = load_record_by_id(record_id)
-
-                    if res:
-                        st.session_state.main_report = res.get("report", "")
-                        st.session_state.chat_history = history_from_text(res.get("history", ""))
-
-                        # 优先用存储的 ptype 还原类型，老档案无 ptype 则按名字兜底判断
-                        saved_ptype = res.get("ptype") or None
-                        if saved_ptype in ("single", "double", "bazi", "bracelet", "fengshui"):
-                            st.session_state.current_prompt_type = saved_ptype
-                        elif "&" in str(res.get("name", "")):
-                            st.session_state.current_prompt_type = "double"
-                        else:
-                            st.session_state.current_prompt_type = "single"
-                        st.success(f"已恢复档案")
+                selected_record = record_options[selected_label]
+                st.caption(
+                    f"已选择：{selected_record.get('name', '')}｜生日：{selected_record.get('birth_info', '')}"
+                )
+                if st.button("调出该档案", key="load_selected_archive"):
+                    if restore_record_to_session(selected_record):
+                        st.success("已恢复档案")
                         st.rerun()
+                    else:
+                        st.error("档案读取失败，请重新选择。")
     else:
         st.caption("💡 暂无历史测算档案。")
 
@@ -1337,6 +1353,15 @@ if user_payload and chosen_prompt:
   正面：钱更可能来自稳定工资、项目、副业、销售、人脉、内容表达、专业技能、合作资源中的哪一类。
   负面：容易因为冲动、分散、信错人、守财差、节奏不稳或方向错而损耗。
 - 如果要看 2026-2027 具体月份该冲还是该守，需要自然引导补具体出生时间私信。
+- 最后一段必须加入“符合当前五行偏性的居家风水小建议”，不要另起第五个标题。
+- 风水建议必须具体到“哪里少放什么、哪里可以放什么”，并且贴合命盘目标五行：
+  木弱或需要木：东方、书桌或学习工作区保持通畅，可放健康绿植、木质物件；少堆旧纸箱和枯萎植物。
+  火弱或需要火：南方、客厅曝光区可用暖光、红色小点缀或明亮摆件；少放太多黑灰冷色和厚重遮挡。
+  土弱或需要土：房屋中心、餐厅或稳定区保持干净，可放陶瓷、方形收纳、米黄土色小物；少放杂乱移动物。
+  金弱或需要金：西方、西北方或办公区加强整洁和边界，可放金属色、白色、圆形或收纳类物件；少放破损物品。
+  水弱或需要水：北方、入口动线或工作灵感区保持流动，可放蓝黑色小物、玻璃杯、流线形摆件；少放过强灯光和红色杂物。
+  某元素过旺：不要继续在对应方位堆同类颜色、材质和物件，而是用命盘所需元素做平衡。
+- 风水建议要像直播里顺手提醒，不要说成保证转运、发财或化灾。
 
 【互动点写法】
 最多 1 句，放在讲五行能量或现在障碍之后。
@@ -1372,10 +1397,10 @@ if user_payload and chosen_prompt:
 
 如果要看 2026 到 2027 哪几个月适合冲事业，哪几个月要守财，这个需要补具体出生时间私信我，我才能看得更细。
 
-我的建议很简单：先把方向收窄，再谈加速；先让钱稳定留下来，再去扩大机会。
+我的建议很简单：先把方向收窄，再谈加速；先让钱稳定留下来，再去扩大机会。家里也可以配合做一个小调整，她这种火土明显的人，南方不要堆太多红色、灯光和杂物，入口和北方保持干净通畅，可以放一点蓝黑色或玻璃感的小物，让能量不要一直往急和累的方向走。
 """
             else:
-                live_constraint = "\n\n⚠️【重要提醒：直播快速简评模式】：当前由直播快速引擎驱动，你【只需输出】【### 📜 PARTE 0: 直播总体简单评价】这一个模块，严禁输出 PARTE I/II/III/IV 等任何后续深度模块。务必满足：纯中文、900-1300字、一句一段、段间空行、直白通俗。必须依据【程序排盘预校验】的日主、年月日柱或四柱、五行旺衰和十神主轴来写，但不要像八字课堂一样解释术语。输出必须围绕四段：1五行能量速懂，2过去状态回顾，3现在的障碍，4未来工作与财富。第一段开头必须先点明生肖和纳音命格，例如属什么、什么命；生肖和纳音只点到为止，不要展开生肖性格鸡汤，马上转入五行能量。必须让拉美用户用生活语言听懂：木=成长计划，火=表达行动，土=稳定责任，金=判断边界，水=头脑流动。必须说清楚此人哪种能量多、哪种能量少，会造成什么；过去正面负面都要讲；现在重点突出2-3个负面障碍；未来只重点讲工作和财富的正面机会与负面风险。禁止把不同命盘都写成同一套压力、责任、硬扛模板。不要推荐手串，除非用户明确问手串。如果要看2026-2027具体月份该冲还是该守，需要补具体出生时间私信我。"
+                live_constraint = "\n\n⚠️【重要提醒：直播快速简评模式】：当前由直播快速引擎驱动，你【只需输出】【### 📜 PARTE 0: 直播总体简单评价】这一个模块，严禁输出 PARTE I/II/III/IV 等任何后续深度模块。务必满足：纯中文、900-1300字、一句一段、段间空行、直白通俗。必须依据【程序排盘预校验】的日主、年月日柱或四柱、五行旺衰和十神主轴来写，但不要像八字课堂一样解释术语。输出必须围绕四段：1五行能量速懂，2过去状态回顾，3现在的障碍，4未来工作与财富。第一段开头必须先点明生肖和纳音命格，例如属什么、什么命；生肖和纳音只点到为止，不要展开生肖性格鸡汤，马上转入五行能量。必须让拉美用户用生活语言听懂：木=成长计划，火=表达行动，土=稳定责任，金=判断边界，水=头脑流动。必须说清楚此人哪种能量多、哪种能量少，会造成什么；过去正面负面都要讲；现在重点突出2-3个负面障碍；未来只重点讲工作和财富的正面机会与负面风险。最后一段必须加入符合当前五行偏性的居家风水小建议，具体说哪里要少放什么、哪里可以放什么；木弱补东方绿植或木质感，火弱补南方暖光或红色小点缀，土弱补中心区陶瓷或方形收纳，金弱补西方/西北方金属色白色圆形或整洁收纳，水弱补北方蓝黑色玻璃感或流动感；某元素过旺就少在对应方位继续堆同类颜色材质。风水建议只能作为生活调整，不要承诺转运发财。禁止把不同命盘都写成同一套压力、责任、硬扛模板。不要推荐手串，除非用户明确问手串。如果要看2026-2027具体月份该冲还是该守，需要补具体出生时间私信我。"
         else:
             live_constraint = "\n\n⚠️【重要提醒：完整版深度模式】：无需输出 PARTE 0 模块，直接从 PARTE I 开始执行高标准深度双语（西语+中文）推演，完整输出 PARTE I/II/III/IV 全部模块。"
 
