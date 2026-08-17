@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
@@ -134,7 +135,7 @@ PROMPT_SINGLE = """
 
 
 ### 🚀 PARTE III: CRONOGRAMA DE EXPANSIÓN 2026 (流年细推)
-- 从 2026 年当前月份进行拆解，请核准目前的月份日期，比如目前是8月17日，就要从8月开始。每个月份都需要独立分析！必须使用情绪化标题，请特别注意，请根据现在的月份时间往后进行流年细推，文字长度不少于2000字。
+- 从 2026 年开始6月进行拆解，每个月份都需要独立分析！必须使用情绪化标题，请特别注意，请根据现在的月份时间往后进行流年细推，文字长度不少于2000字。
 - **整体内容风格**：以西方受众能理解的能量学解释为主，同时也要有一些简单的八字概念或着理念。如果使用了八字专用术语，需要简单解释其含义。
 
 
@@ -1472,6 +1473,9 @@ if user_payload and chosen_prompt:
         client = OpenAI(api_key=active_key, base_url=active_url, timeout=600.0)
         placeholder = st.empty()
         current_full_text = ""
+        last_render_at = 0.0
+        last_render_len = 0
+        final_finish_reason = ""
         
         try:
             if is_fengshui_request:
@@ -1483,6 +1487,7 @@ if user_payload and chosen_prompt:
             else:
                 spinner_msg = "齐大师正在快速点评..." if is_live_mode else "齐大师正在调动命理能量磁场，深度推演中..."
             with st.spinner(spinner_msg):
+                max_tokens = 3500 if (is_live_mode or is_bracelet_request or is_fengshui_request) else 8192
                 response = client.chat.completions.create(
                     model=active_model,
                     messages=[
@@ -1491,14 +1496,29 @@ if user_payload and chosen_prompt:
                     ],
                     stream=True,
                     temperature=0.8,
-                    max_tokens=8192 
+                    max_tokens=max_tokens,
                 )
                 
                 for chunk in response:
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        current_full_text += chunk.choices[0].delta.content
+                    if chunk.choices:
+                        if chunk.choices[0].finish_reason:
+                            final_finish_reason = chunk.choices[0].finish_reason
+                        delta_content = getattr(chunk.choices[0].delta, "content", None)
+                    else:
+                        delta_content = None
+
+                    if delta_content:
+                        current_full_text += delta_content
                         st.session_state.main_report = current_full_text
-                        placeholder.markdown(current_full_text + "▌")
+                        now = time.monotonic()
+                        should_render = (
+                            now - last_render_at >= 0.35
+                            or len(current_full_text) - last_render_len >= 500
+                        )
+                        if should_render:
+                            placeholder.markdown(current_full_text + "▌")
+                            last_render_at = now
+                            last_render_len = len(current_full_text)
                 
                 placeholder.markdown(current_full_text)
                 st.session_state.main_report = current_full_text
@@ -1517,9 +1537,29 @@ if user_payload and chosen_prompt:
                     st.success("推演报告已成功保存。")
                 else:
                     st.warning("报告已生成，但自动保存失败。当前页面已保留完整内容，请先不要刷新页面，可以在报告下方点击重新保存。")
+                if final_finish_reason == "length":
+                    st.warning("模型达到本次输出长度上限，报告可能没有完全写完。当前已生成内容已保存，可以用追问继续补全后半段。")
                 placeholder.empty()
 
         except Exception as e:
+            if current_full_text.strip():
+                st.session_state.main_report = current_full_text
+                interrupted_msg = (
+                    "生成过程中连接中断，但已保留中断前内容。你可以先使用当前页面内容，"
+                    "或点击下方按钮把这份中断草稿重新保存到档案库。"
+                )
+                saved_partial = save_record(
+                    st.session_state.get("last_name", final_name),
+                    st.session_state.get("last_birth", final_birth),
+                    current_full_text,
+                    st.session_state.chat_history,
+                    st.session_state.current_prompt_type,
+                )
+                st.session_state.last_save_error = (
+                    "生成过程中连接中断，中断前内容已保存为草稿。"
+                    if saved_partial
+                    else interrupted_msg
+                )
             st.error(f"推演错误：{e}")
 
 # --- 8. 追加提问逻辑 ---
