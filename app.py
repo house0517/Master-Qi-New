@@ -18,6 +18,29 @@ try:
 except ImportError:
     GSheetsConnection = None
 
+ZODIAC_BY_BRANCH = {
+    "子": "鼠",
+    "丑": "牛",
+    "寅": "虎",
+    "卯": "兔",
+    "辰": "龙",
+    "巳": "蛇",
+    "午": "马",
+    "未": "羊",
+    "申": "猴",
+    "酉": "鸡",
+    "戌": "狗",
+    "亥": "猪",
+}
+
+
+def zodiac_from_ganzhi(ganzhi):
+    ganzhi = str(ganzhi or "").strip()
+    if len(ganzhi) < 2:
+        return "", "未知"
+    branch = ganzhi[1]
+    return branch, ZODIAC_BY_BRANCH.get(branch, "未知")
+
 # --- 1. 页面配置 ---
 st.set_page_config(page_title="Maestro Qi | 齐大师数字化命理", layout="wide", page_icon="🔮")
 
@@ -58,7 +81,7 @@ PROMPT_SINGLE = """
 1. **语言限制**：本模块【只用中文】输出，严禁夹杂任何西语。
 2. **排版限制**：字数严格控制在 1000 字以内。必须做到【一句话独立成一段】，段与段之间必须空行。文字要极其直白、简单，绝对不要用生僻的算命术语，确保西语翻译软件或同传能 100% 精准翻译。
 3. **核心内容**：
-   - 开头直接点明用户的【生肖（Animal del zodíaco）】和【纳音属性（如：炉中火命、大林木命、城头土命等）】。
+   - 开头直接点明用户的【生肖（Animal del zodíaco）】和【纳音属性（如：炉中火命、大林木命、城头土命等）】；必须引用【程序排盘预校验】里的“生肖”和“年柱纳音”，不得根据生日字符串格式自行猜生肖。
    - 简单直白地描述她未来的核心运势走向（财富、情感或转折点）。
    - 【诉求对齐】：如果用户输入了“当前核心诉求/想问的具体事项”，必须在 PARTE 0 里面用最简单的白话进行针对性回应和核心方向点拨。
    - 【钩子文案】：不要只在结尾泛泛引导私信；应在事业、财富、情感等具体判断后，顺手加入对应私信引导。
@@ -111,7 +134,7 @@ PROMPT_SINGLE = """
 
 
 ### 🚀 PARTE III: CRONOGRAMA DE EXPANSIÓN 2026 (流年细推)
-- 从目前月份开始进行拆解，持续一年，到2027年，每个月份都需要独立分析！必须使用情绪化标题，请特别注意，请根据现在的月份时间往后进行流年细推，文字长度不少于2000字。
+- 从 2026 年开始6月进行拆解，每个月份都需要独立分析！必须使用情绪化标题，请特别注意，请根据现在的月份时间往后进行流年细推，文字长度不少于2000字。
 - **整体内容风格**：以西方受众能理解的能量学解释为主，同时也要有一些简单的八字概念或着理念。如果使用了八字专用术语，需要简单解释其含义。
 
 
@@ -136,7 +159,7 @@ PROMPT_DOUBLE = """
 1. **语言限制**：本模块【只用中文】输出，严禁夹杂任何西语。
 2. **排版限制**：字数严格控制在 1000 字以内。必须做到【一句话独立成一段】，段与段之间必须空行，文字通俗易懂，便于翻译。
 3. **核心内容**：
-   - 开头直接点明【对象 A】和【对象 B】各自的【生肖】和【纳音命理属性（如火命、土命）】。
+   - 开头直接点明【对象 A】和【对象 B】各自的【生肖】和【纳音命理属性（如火命、土命）】；必须引用各自【程序排盘预校验】里的“生肖”和“年柱纳音”，不得根据生日字符串格式自行猜生肖。
    - 用大白话一句话一段地指出这两个人磁场是“互相滋养”还是“互相消耗”，未来两人的发展概况。
    - 【诉求对齐】：如果用户给出了具体的合盘痛点诉求，必须在此处用极简的白话直接点破核心。
    - 【钩子文案】：在结尾附带引导，例如：“如果你想知道你们两人感情复合、正缘应期、商业合伙破局的细节，可以点击主页进一步细看”。
@@ -315,7 +338,7 @@ PROMPT_BAZI = """
 ### 📜 PARTE 0: 直播总体简单评价（直播快评模式专用）
 1. 只用中文，严禁夹杂西语。
 2. 1000字以内，一句一段、段间空行，直白通俗便于翻译。
-3. 开头点明【生肖】和【纳音（如炉中火命、大林木命）】，简单说核心运势走向，针对核心诉求白话点拨。不要只在结尾泛泛引导私信；应在事业、财富、情感等具体判断后，顺手加入对应私信引导。
+3. 开头点明【生肖】和【纳音（如炉中火命、大林木命）】，必须引用【程序排盘预校验】里的“生肖”和“年柱纳音”，不得根据生日字符串格式自行猜生肖；简单说核心运势走向，针对核心诉求白话点拨。不要只在结尾泛泛引导私信；应在事业、财富、情感等具体判断后，顺手加入对应私信引导。
 
 ## 输出结构（完整深度模式）
 **【语言 · 分段交替】**：采用【逐模块西中交替】格式，禁止全文西语写完再统一翻译。每个 PARTE 先输出纯正流畅、富感染力的西班牙语 (Español)，紧接着用「(Traducción al Chino)」给出该模块 1:1 完整中文翻译，再进入下一 PARTE 重复"先西后中"，严禁缺段。
@@ -357,6 +380,10 @@ if "last_name" not in st.session_state:
     st.session_state.last_name = ""
 if "last_birth" not in st.session_state:
     st.session_state.last_birth = ""
+if "last_save_ok" not in st.session_state:
+    st.session_state.last_save_ok = False
+if "last_save_error" not in st.session_state:
+    st.session_state.last_save_error = ""
 
 # --- 4. 数据持久化：优先 Google Sheets，SQLite 仅作本地兜底 ---
 RECORD_COLUMNS = ["id", "name", "birth_info", "report", "history", "date", "ptype"]
@@ -500,11 +527,14 @@ def build_bazi_precheck(name, gender, birth, place="", label="命主"):
     )
     lunar = solar.getLunar()
     eight_char = lunar.getEightChar()
+    year_ganzhi = eight_char.getYear()
+    year_branch, zodiac = zodiac_from_ganzhi(year_ganzhi)
+    year_nayin = eight_char.getYearNaYin()
     gender_value = 1 if "男" in str(gender) or "Hombre" in str(gender) else 0
     yun = eight_char.getYun(gender_value)
 
     pillars = [
-        ("年柱", eight_char.getYear(), eight_char.getYearShiShenGan(), eight_char.getYearHideGan(), eight_char.getYearNaYin(), eight_char.getYearXunKong()),
+        ("年柱", year_ganzhi, eight_char.getYearShiShenGan(), eight_char.getYearHideGan(), year_nayin, eight_char.getYearXunKong()),
         ("月柱", eight_char.getMonth(), eight_char.getMonthShiShenGan(), eight_char.getMonthHideGan(), eight_char.getMonthNaYin(), eight_char.getMonthXunKong()),
         ("日柱", eight_char.getDay(), "日主", eight_char.getDayHideGan(), eight_char.getDayNaYin(), eight_char.getDayXunKong()),
     ]
@@ -548,6 +578,7 @@ def build_bazi_precheck(name, gender, birth, place="", label="命主"):
 出生地：{place or "未提供"}（提示：当前程序尚未做经纬度真太阳时校正；若出生时间接近时辰交界，需人工复核）
 性别：{gender}
 农历：{lunar}
+生肖：{zodiac}（年柱地支：{year_branch or "未知"}）｜年柱纳音：{year_nayin}
 {pillars_summary}
 日主：{eight_char.getDayGan()}
 胎元：{eight_char.getTaiYuan()}｜命宫：{eight_char.getMingGong()}｜身宫：{eight_char.getShenGong()}
@@ -673,7 +704,28 @@ def load_records():
         try:
             df = normalize_records_df(gsheets.read(worksheet=get_gsheets_worksheet(), ttl=0))
             df = df.sort_values("id", ascending=False)
-            return df.to_dict("records")
+            cloud_records = df.to_dict("records")
+            local_records = load_records_from_sqlite()
+            seen = {
+                (
+                    str(row.get("name", "")),
+                    str(row.get("birth_info", "")),
+                    str(row.get("ptype", "")),
+                )
+                for row in cloud_records
+            }
+            local_only = []
+            for row in local_records:
+                key = (
+                    str(row.get("name", "")),
+                    str(row.get("birth_info", "")),
+                    str(row.get("ptype", "")),
+                )
+                if key not in seen and str(row.get("report", "")).strip():
+                    row = dict(row)
+                    row["id"] = f"local-{row.get('id')}"
+                    local_only.append(row)
+            return local_only + cloud_records
         except Exception as e:
             st.warning(f"读取云端档案失败，已临时读取本地 SQLite：{e}")
     return load_records_from_sqlite()
@@ -704,6 +756,8 @@ def restore_record_to_session(record):
     else:
         st.session_state.current_prompt_type = "single"
 
+    st.session_state.last_save_ok = True
+    st.session_state.last_save_error = ""
     return True
 
 
@@ -790,14 +844,23 @@ def save_to_gsheets(name, birth, report, history, ptype="single"):
 
 
 def save_record(name, birth, report, history, ptype="single"):
+    st.session_state.last_save_error = ""
     identity_error = validate_record_identity(name, birth, ptype)
     if identity_error:
         st.error(identity_error)
+        st.session_state.last_save_error = identity_error
         return False
 
     if save_to_gsheets(name, birth, report, history, ptype):
+        st.session_state.last_save_ok = True
         return True
-    return save_to_sqlite(name, birth, report, history, ptype)
+    saved_local = save_to_sqlite(name, birth, report, history, ptype)
+    st.session_state.last_save_ok = saved_local
+    if saved_local:
+        st.session_state.last_save_error = "云端 Google Sheets 保存失败，已临时保存到本地 SQLite。线上环境重启后本地记录可能丢失，请稍后重试云端保存。"
+    else:
+        st.session_state.last_save_error = "云端和本地保存都失败。本次结果已保留在当前页面，请先不要刷新页面。"
+    return saved_local
 
 # --- 5. 侧边栏 ---
 with st.sidebar:
@@ -1149,7 +1212,9 @@ if user_payload and chosen_prompt:
         st.error(config_error)
     else:
         st.session_state.chat_history = []
-        st.session_state.main_report = "" 
+        st.session_state.main_report = ""
+        st.session_state.last_save_ok = False
+        st.session_state.last_save_error = ""
         
         # 动态拼接直播间模式附加指令
         if is_live_mode or is_bracelet_request or is_fengshui_request:
@@ -1319,7 +1384,7 @@ if user_payload and chosen_prompt:
 【4. 未来工作与财富】
 
 【1. 五行能量速懂】
-- 开头必须先点明此人的生肖和纳音命格，例如“她是属龙，纳音是大林木命”。如果程序预校验能识别纳音，必须引用年柱纳音；如果信息不足，只说“按当前资料初步看”。
+- 开头必须先点明此人的生肖和纳音命格，例如“她是属龙，纳音是大林木命”。必须引用【程序排盘预校验】里的“生肖”和“年柱纳音”，不得根据生日字符串格式自行猜生肖；如果信息不足，只说“按当前资料初步看”。
 - 生肖和纳音只点到为止，不要展开成生肖性格鸡汤；马上转入五行能量说明。
 - 必须用最简单方式让拉美用户听懂五行。
 - 可用这个映射，但不要长篇教学：
@@ -1400,7 +1465,7 @@ if user_payload and chosen_prompt:
 我的建议很简单：先把方向收窄，再谈加速；先让钱稳定留下来，再去扩大机会。家里也可以配合做一个小调整，她这种火土明显的人，南方不要堆太多红色、灯光和杂物，入口和北方保持干净通畅，可以放一点蓝黑色或玻璃感的小物，让能量不要一直往急和累的方向走。
 """
             else:
-                live_constraint = "\n\n⚠️【重要提醒：直播快速简评模式】：当前由直播快速引擎驱动，你【只需输出】【### 📜 PARTE 0: 直播总体简单评价】这一个模块，严禁输出 PARTE I/II/III/IV 等任何后续深度模块。务必满足：纯中文、900-1300字、一句一段、段间空行、直白通俗。必须依据【程序排盘预校验】的日主、年月日柱或四柱、五行旺衰和十神主轴来写，但不要像八字课堂一样解释术语。输出必须围绕四段：1五行能量速懂，2过去状态回顾，3现在的障碍，4未来工作与财富。第一段开头必须先点明生肖和纳音命格，例如属什么、什么命；生肖和纳音只点到为止，不要展开生肖性格鸡汤，马上转入五行能量。必须让拉美用户用生活语言听懂：木=成长计划，火=表达行动，土=稳定责任，金=判断边界，水=头脑流动。必须说清楚此人哪种能量多、哪种能量少，会造成什么；过去正面负面都要讲；现在重点突出2-3个负面障碍；未来只重点讲工作和财富的正面机会与负面风险。最后一段必须加入符合当前五行偏性的居家风水小建议，具体说哪里要少放什么、哪里可以放什么；木弱补东方绿植或木质感，火弱补南方暖光或红色小点缀，土弱补中心区陶瓷或方形收纳，金弱补西方/西北方金属色白色圆形或整洁收纳，水弱补北方蓝黑色玻璃感或流动感；某元素过旺就少在对应方位继续堆同类颜色材质。风水建议只能作为生活调整，不要承诺转运发财。禁止把不同命盘都写成同一套压力、责任、硬扛模板。不要推荐手串，除非用户明确问手串。如果要看2026-2027具体月份该冲还是该守，需要补具体出生时间私信我。"
+                live_constraint = "\n\n⚠️【重要提醒：直播快速简评模式】：当前由直播快速引擎驱动，你【只需输出】【### 📜 PARTE 0: 直播总体简单评价】这一个模块，严禁输出 PARTE I/II/III/IV 等任何后续深度模块。务必满足：纯中文、900-1300字、一句一段、段间空行、直白通俗。必须依据【程序排盘预校验】的日主、年月日柱或四柱、生肖、年柱纳音、五行旺衰和十神主轴来写，但不要像八字课堂一样解释术语。输出必须围绕四段：1五行能量速懂，2过去状态回顾，3现在的障碍，4未来工作与财富。第一段开头必须先点明生肖和纳音命格，例如属什么、什么命；生肖和纳音必须引用【程序排盘预校验】里的“生肖”和“年柱纳音”，不得根据生日字符串格式自行猜生肖；只点到为止，不要展开生肖性格鸡汤，马上转入五行能量。必须让拉美用户用生活语言听懂：木=成长计划，火=表达行动，土=稳定责任，金=判断边界，水=头脑流动。必须说清楚此人哪种能量多、哪种能量少，会造成什么；过去正面负面都要讲；现在重点突出2-3个负面障碍；未来只重点讲工作和财富的正面机会与负面风险。最后一段必须加入符合当前五行偏性的居家风水小建议，具体说哪里要少放什么、哪里可以放什么；木弱补东方绿植或木质感，火弱补南方暖光或红色小点缀，土弱补中心区陶瓷或方形收纳，金弱补西方/西北方金属色白色圆形或整洁收纳，水弱补北方蓝黑色玻璃感或流动感；某元素过旺就少在对应方位继续堆同类颜色材质。风水建议只能作为生活调整，不要承诺转运发财。禁止把不同命盘都写成同一套压力、责任、硬扛模板。不要推荐手串，除非用户明确问手串。如果要看2026-2027具体月份该冲还是该守，需要补具体出生时间私信我。"
         else:
             live_constraint = "\n\n⚠️【重要提醒：完整版深度模式】：无需输出 PARTE 0 模块，直接从 PARTE I 开始执行高标准深度双语（西语+中文）推演，完整输出 PARTE I/II/III/IV 全部模块。"
 
@@ -1432,6 +1497,7 @@ if user_payload and chosen_prompt:
                 for chunk in response:
                     if chunk.choices and chunk.choices[0].delta.content:
                         current_full_text += chunk.choices[0].delta.content
+                        st.session_state.main_report = current_full_text
                         placeholder.markdown(current_full_text + "▌")
                 
                 placeholder.markdown(current_full_text)
@@ -1449,7 +1515,9 @@ if user_payload and chosen_prompt:
                 )
                 if saved:
                     st.success("推演报告已成功保存。")
-                    st.rerun()
+                else:
+                    st.warning("报告已生成，但自动保存失败。当前页面已保留完整内容，请先不要刷新页面，可以在报告下方点击重新保存。")
+                placeholder.empty()
 
         except Exception as e:
             st.error(f"推演错误：{e}")
@@ -1459,6 +1527,23 @@ if st.session_state.main_report:
     st.markdown("---")
     st.subheader("📜 核心能量推演报告 (Reporte Principal)")
     st.markdown(st.session_state.main_report) 
+
+    if st.session_state.get("last_save_error"):
+        st.warning(st.session_state.last_save_error)
+        if st.button("重新保存当前报告到档案库", key="retry_save_current_report"):
+            saved = save_record(
+                st.session_state.get("last_name", ""),
+                st.session_state.get("last_birth", ""),
+                st.session_state.main_report,
+                st.session_state.chat_history,
+                st.session_state.current_prompt_type,
+            )
+            if saved and not st.session_state.get("last_save_error"):
+                st.success("当前报告已重新保存到云端档案库。")
+            elif saved:
+                st.warning(st.session_state.last_save_error)
+            else:
+                st.error(st.session_state.last_save_error or "重新保存失败，请检查姓名、生日和 Google Sheets 配置。")
     
     st.markdown("---")
     st.subheader("💬 客户追问与补充历史")
