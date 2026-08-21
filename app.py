@@ -114,6 +114,7 @@ PROMPT_SINGLE = """
 1. **生态叙事法则 (Storytelling Ecológico)**：严禁使用孤立的五行隐喻。必须围绕用户的日主构建完整的“生态系统”。
 2. **命运考古学 (Arqueología del Destino)**：在预测未来前，必须先利用八字中的喜忌，精准剖析并验证用户“过去的痛苦与挣扎”。
 3. **现代商业五行拆解 (Traducción de Negocios)**：当分析现代职业或商业计划时，必须将其本质拆解为五行元素并给出诊断。
+4. **职业现实对齐**：如果用户提供了职业/行业/岗位信息，必须把它作为事业分析的重要现实参照，结合工作场景、收入结构、协作关系和发展瓶颈来判断，不能只空谈命格。
 4. **定制化心理魔法 (Psicomagia Personalizada)**：设计 2-3 个极具象征意义的“心理暗示仪式”。
 
 ## 4. 输出结构与排版规范 (Output Structure)
@@ -134,8 +135,8 @@ PROMPT_SINGLE = """
 - **整体内容风格**：以西方受众能理解的能量学解释为主，同时也要有一些简单的八字概念或着理念。如果使用了八字专用术语，需要简单解释其含义。
 
 
-### 🚀 PARTE III: CRONOGRAMA DE EXPANSIÓN 2026 (流年细推)
-- 从当前时间点的月份开始进行拆解，比如今天是2026年8月17日，那么就要从8月开始算起，每个月份都需要独立分析！必须使用情绪化标题，请特别注意，请根据现在的月份时间往后进行流年细推，文字长度不少于2000字。
+### 🚀 PARTE III: CRONOGRAMA DE EXPANSIÓN（月度细推）
+- 从【月度测算区间】的起始月份开始拆解，一直写到结束月份，每个月份都需要独立分析！必须使用情绪化标题，请特别注意，请根据当前系统日期自动生成的月度区间往后细推，文字长度不少于2000字。
 - **整体内容风格**：以西方受众能理解的能量学解释为主，同时也要有一些简单的八字概念或着理念。如果使用了八字专用术语，需要简单解释其含义。
 
 
@@ -225,8 +226,20 @@ _BAZI_INJECT_NOTE = """
 - 简言之：排盘只在后台帮你算准，前台呈现仍是你原汁原味、面向西语用户的那一套能量叙事，不得变成中文排盘报告。
 """ + BAZI_DATA
 
+_STYLE_ALIGNMENT_NOTE = """
+
+## 【参考成稿风格补强（务必执行）】
+- 参考优质成稿的写法，开头不要先铺太多理论，而是先用一句很清楚的“核心诊断”点破这张命盘最重要的矛盾或优势。
+- 事业与财富必须落到现实语言：行业、岗位、工作方式、收入结构、合作边界、表达方式、执行节奏，而不是只讲五行术语。
+- 如果谈过去、现在、未来，优先讲“这类能量会让你在现实里怎样表现、怎样卡住、怎样突破”，不要长篇解释概念。
+- 月度推演必须写成“月份标题 + 该月重点 + 工作/钱/关系/风险/建议”的结构，尽量具体、可执行、可复盘，不要空泛教学。
+- 结尾要给出清楚的判断和 1-2 个现实动作，避免重复鸡汤式总结；如果要引导私信，尽量放在对应主题后面，而不是最后泛泛一句。
+"""
+
 PROMPT_SINGLE = PROMPT_SINGLE + _BAZI_INJECT_NOTE
 PROMPT_DOUBLE = PROMPT_DOUBLE + _BAZI_INJECT_NOTE
+PROMPT_SINGLE = PROMPT_SINGLE + _STYLE_ALIGNMENT_NOTE
+PROMPT_BAZI = PROMPT_BAZI + _STYLE_ALIGNMENT_NOTE
 
 PROMPT_BRACELET = PROMPT_SINGLE + """
 
@@ -355,8 +368,8 @@ PROMPT_BAZI = """
 - 统计五行力量分布，定喜用神与忌神（调候+扶抑+通关，参考《穷通宝典》《子平真诠》）。
 - 判定格局及高低成败。结合十神与宫位，剖析事业、财富、感情婚姻、健康。此部分不少于 3000 字。
 
-### 🚀 PARTE III: CRONOGRAMA 2026 (大运流年细推)
-- 分析当前所处大运吉凶，再从2026年起逐月推演（结合流年干支与原局/大运的冲合刑害），每月独立小标题，不少于 2000 字。
+### 🚀 PARTE III: CRONOGRAMA（月度流年细推）
+- 分析当前所处大运吉凶，再从【月度测算区间】起始月份开始逐月推演（结合流年干支与原局/大运的冲合刑害），每月独立小标题，不少于 2000 字。
 
 ### 🕯️ PARTE IV: VERIFICACIÓN Y ALQUIMIA (历史校准·开运建议·手串)
 - 【历史校准】据大运流年，提出 3-5 个该人"已发生"的关键事件时间段与性质，请用户验证。
@@ -385,6 +398,10 @@ if "last_save_ok" not in st.session_state:
     st.session_state.last_save_ok = False
 if "last_save_error" not in st.session_state:
     st.session_state.last_save_error = ""
+if "enable_copy_review" not in st.session_state:
+    st.session_state.enable_copy_review = True
+if "last_review_status" not in st.session_state:
+    st.session_state.last_review_status = ""
 
 # --- 4. 数据持久化：优先 Google Sheets，SQLite 仅作本地兜底 ---
 RECORD_COLUMNS = ["id", "name", "birth_info", "report", "history", "date", "ptype"]
@@ -428,6 +445,90 @@ def validate_api_config(api_key, base_url, model, label):
         return f"{label}模型名称里含有中文或非英文字符，请填写真实模型名。"
 
     return ""
+
+
+def format_generation_error(error):
+    text = str(error)
+    lower_text = text.lower()
+    if "524" in lower_text or "proxy read timeout" in lower_text or "took too long" in lower_text:
+        return (
+            "推演超时：当前 API 代理要求 120 秒内完成返回，但这次模型生成太慢或内容太长。"
+            "请优先切换到更快的快速模型，或缩短本次输出；如果是完整版深度报告，建议先生成核心分析，再用追问继续补后半段。"
+        )
+    return f"推演错误：{error}"
+
+
+def review_copy_text(raw_text, primary_engine, fallback_engine=None, context_label="报告"):
+    raw_text = str(raw_text or "").strip()
+    if not raw_text:
+        return raw_text, False, "空内容，跳过复核。"
+
+    review_prompt = """
+你是专业中文文案复核编辑。
+任务：只做语法、病句、重复、标点、口播顺滑度、个别生硬表达的修正。
+严格禁止：
+- 改变命理结论、五行判断、年份月份、职业判断、事业财富情感结论
+- 新增事实、删掉关键建议、改写成更夸张的说法
+- 改变标题层级、段落结构、模块顺序
+- 输出说明、点评、修改清单
+如果原文已经很好，只做最小幅度润色。
+只输出修订后的正文，不要附加解释。
+"""
+
+    engines = [primary_engine]
+    if fallback_engine and fallback_engine != primary_engine:
+        engines.append(fallback_engine)
+
+    last_error = ""
+    for engine_label, api_key, base_url, model in engines:
+        if not api_key or not base_url or not model:
+            continue
+        try:
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=300.0)
+            max_tokens = min(2200, max(900, int(len(raw_text) * 0.6)))
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": review_prompt},
+                    {
+                        "role": "user",
+                        "content": f"请复核并润色下面这份【{context_label}】文案，只修语法和表达，不改结论：\n\n{raw_text}",
+                    },
+                ],
+                stream=False,
+                temperature=0.1,
+                max_tokens=max_tokens,
+            )
+            revised = resp.choices[0].message.content.strip()
+            if revised:
+                return revised, True, f"已完成{engine_label}文案复核。"
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    return raw_text, False, f"文案复核失败，已保留原文。{last_error}"
+
+
+def add_months(dt, months):
+    year = dt.year + (dt.month - 1 + months) // 12
+    month = (dt.month - 1 + months) % 12 + 1
+    return dt.replace(year=year, month=month, day=1)
+
+
+def build_month_forecast_note():
+    start_dt = datetime.datetime.now().replace(day=1)
+    end_dt = add_months(start_dt, 12)
+    labels = []
+    cursor = start_dt
+    for _ in range(13):
+        labels.append(f"{cursor.year}年{cursor.month}月")
+        cursor = add_months(cursor, 1)
+    return (
+        f"起始月份：{start_dt.year}年{start_dt.month}月\n"
+        f"结束月份：{end_dt.year}年{end_dt.month}月\n"
+        f"逐月顺序：{'、'.join(labels)}\n"
+        "说明：必须从起始月份写到结束月份，共13个月，每个月独立分析，不要跳月，不要固定写死 2026。"
+    )
 
 
 def normalize_record_identity(name, birth, ptype):
@@ -923,6 +1024,11 @@ with st.sidebar:
         disabled=not is_live_mode,
         help="只影响直播快速简评的表达结构，不改变排盘和命理计算。开启后会生成 2.5-3.5 分钟的自然口播稿，并在正文中加入互动点。",
     )
+    st.toggle(
+        "生成后自动文案复核",
+        key="enable_copy_review",
+        help="会在输出后再做一轮中文语法和表达润色，不改命理结论。若你赶时间，可以关闭。",
+    )
     
     st.markdown("---")
     st.title("📂 永久档案库")
@@ -999,6 +1105,11 @@ with tab_single:
     with col2:
         birth_s = st.text_input("生辰信息 (Ej: 1988-05-17，可选 08:30)", key="birth_s")
         place_s = st.text_input("出生城市 (Lugar de nacimiento)", key="place_s")
+    occupation_s = st.text_input(
+        "职业/行业 (Ocupación / Rubro)",
+        placeholder="例：销售、自由职业、老师、管理、餐饮、运营等",
+        key="occupation_s",
+    )
     focus_s = st.text_area("当前核心诉求 (Su consulta principal)", placeholder="例：2026年事业抉择、情感走向等", key="focus_s")
     
     if st.button("开始深度个人能量推演 (Iniciar Lectura Individual)"):
@@ -1009,9 +1120,15 @@ with tab_single:
             st.stop()
         set_current_record_identity(final_name, final_birth, final_ptype)
         # 诉求为空时，自动转为八字全面综合测算，绝不允许跑偏成星座占星
-        focus_final_s = focus_s.strip() if focus_s.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理测算】，重点覆盖事业财富、感情婚姻、健康、2026流年走向，绝对围绕生辰八字展开。"
+        focus_final_s = focus_s.strip() if focus_s.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理测算】，重点覆盖事业财富、感情婚姻、健康，以及从当前月份到明年同月的月度走向，绝对围绕生辰八字展开。"
         bazi_precheck = build_bazi_precheck(final_name, gender_s, final_birth, place_s, "个人单盘")
-        user_payload = f"{bazi_precheck}\n\n【单盘请求】姓名：{final_name}, 性别：{gender_s}, 生辰：{final_birth}, 出生地：{place_s}, 诉求：{focus_final_s}"
+        month_forecast_note = build_month_forecast_note()
+        occupation_final_s = occupation_s.strip() if occupation_s.strip() else "未提供"
+        user_payload = (
+            f"{bazi_precheck}\n\n"
+            f"【月度测算区间】\n{month_forecast_note}\n\n"
+            f"【单盘请求】姓名：{final_name}, 性别：{gender_s}, 生辰：{final_birth}, 出生地：{place_s}, 职业/行业：{occupation_final_s}, 诉求：{focus_final_s}"
+        )
         chosen_prompt = PROMPT_SINGLE
 
 with tab_double:
@@ -1078,11 +1195,13 @@ with tab_bazi:
             st.error(identity_error)
             st.stop()
         set_current_record_identity(final_name, final_birth, final_ptype)
-        focus_final_z = focus_z.strip() if focus_z.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理论命】，覆盖日主旺衰、格局用神、事业财富、感情婚姻、健康及2026流年，严格围绕生辰八字，禁止跑偏星座。"
+        focus_final_z = focus_z.strip() if focus_z.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理论命】，覆盖日主旺衰、格局用神、事业财富、感情婚姻、健康，以及从当前月份到明年同月的月度走向，严格围绕生辰八字，禁止跑偏星座。"
         alive_note = "在世（请以当前系统日期为当前时间推算流年）" if alive_z == "在世" else "已故（流年只推算到去世年为止，去世年份请在诉求中补充）"
         bazi_precheck = build_bazi_precheck(final_name, gender_z, solar_z if solar_z.strip() else lunar_z, place_z, "传统八字")
+        month_forecast_note = build_month_forecast_note()
         user_payload = (
             f"{bazi_precheck}\n\n"
+            f"【月度测算区间】\n{month_forecast_note}\n\n"
             f"【中国传统八字排盘请求】\n"
             f"姓名：{name_z}\n"
             f"性别：{gender_z}\n"
@@ -1468,7 +1587,7 @@ if user_payload and chosen_prompt:
             else:
                 live_constraint = "\n\n⚠️【重要提醒：直播快速简评模式】：当前由直播快速引擎驱动，你【只需输出】【### 📜 PARTE 0: 直播总体简单评价】这一个模块，严禁输出 PARTE I/II/III/IV 等任何后续深度模块。务必满足：纯中文、900-1300字、一句一段、段间空行、直白通俗。必须依据【程序排盘预校验】的日主、年月日柱或四柱、生肖、年柱纳音、五行旺衰和十神主轴来写，但不要像八字课堂一样解释术语。输出必须围绕四段：1五行能量速懂，2过去状态回顾，3现在的障碍，4未来工作与财富。第一段开头必须先点明生肖和纳音命格，例如属什么、什么命；生肖和纳音必须引用【程序排盘预校验】里的“生肖”和“年柱纳音”，不得根据生日字符串格式自行猜生肖；只点到为止，不要展开生肖性格鸡汤，马上转入五行能量。必须让拉美用户用生活语言听懂：木=成长计划，火=表达行动，土=稳定责任，金=判断边界，水=头脑流动。必须说清楚此人哪种能量多、哪种能量少，会造成什么；过去正面负面都要讲；现在重点突出2-3个负面障碍；未来只重点讲工作和财富的正面机会与负面风险。最后一段必须加入符合当前五行偏性的居家风水小建议，具体说哪里要少放什么、哪里可以放什么；木弱补东方绿植或木质感，火弱补南方暖光或红色小点缀，土弱补中心区陶瓷或方形收纳，金弱补西方/西北方金属色白色圆形或整洁收纳，水弱补北方蓝黑色玻璃感或流动感；某元素过旺就少在对应方位继续堆同类颜色材质。风水建议只能作为生活调整，不要承诺转运发财。禁止把不同命盘都写成同一套压力、责任、硬扛模板。不要推荐手串，除非用户明确问手串。如果要看2026-2027具体月份该冲还是该守，需要补具体出生时间私信我。"
         else:
-            live_constraint = "\n\n⚠️【重要提醒：完整版深度模式】：无需输出 PARTE 0 模块，直接从 PARTE I 开始执行高标准深度双语（西语+中文）推演，完整输出 PARTE I/II/III/IV 全部模块。"
+            live_constraint = "\n\n⚠️【重要提醒：完整版深度模式】：无需输出 PARTE 0 模块，直接从 PARTE I 开始执行高标准深度双语（西语+中文）推演。为避免接口 120 秒代理超时，本次必须控制在单次可完成长度内；优先输出核心排盘、格局、事业财富和2026关键判断。若内容过多，不要强行写完所有细节，结尾提示用户用追问继续补全 PARTE III/IV 或具体月份。"
 
         client = OpenAI(api_key=active_key, base_url=active_url, timeout=600.0)
         placeholder = st.empty()
@@ -1487,7 +1606,14 @@ if user_payload and chosen_prompt:
             else:
                 spinner_msg = "齐大师正在快速点评..." if is_live_mode else "齐大师正在调动命理能量磁场，深度推演中..."
             with st.spinner(spinner_msg):
-                max_tokens = 3500 if (is_live_mode or is_bracelet_request or is_fengshui_request) else 8192
+                if is_fengshui_request:
+                    max_tokens = 1400
+                elif is_bracelet_request:
+                    max_tokens = 1800
+                elif is_live_mode:
+                    max_tokens = 2400
+                else:
+                    max_tokens = 4500
                 response = client.chat.completions.create(
                     model=active_model,
                     messages=[
@@ -1525,6 +1651,28 @@ if user_payload and chosen_prompt:
                 
                 st.session_state['last_name'] = final_name
                 st.session_state['last_birth'] = final_birth
+
+                review_status = "已跳过文案复核。"
+                if st.session_state.get("enable_copy_review", True):
+                    primary_review_engine = ("快速版", api_key_live, base_url_live, model_live)
+                    fallback_review_engine = ("当前引擎", active_key, active_url, active_model)
+                    with st.spinner("齐大师正在做文案复核..."):
+                        reviewed_text, reviewed_ok, review_status = review_copy_text(
+                            current_full_text,
+                            primary_review_engine,
+                            fallback_review_engine,
+                            context_label="主报告",
+                        )
+                    st.session_state.last_review_status = review_status
+                    if reviewed_ok and reviewed_text.strip():
+                        current_full_text = reviewed_text
+                        st.session_state.main_report = reviewed_text
+                        placeholder.markdown(reviewed_text)
+                        st.success("文案复核完成，已修正明显语病和不顺口表达。")
+                    else:
+                        st.warning(review_status)
+                else:
+                    st.session_state.last_review_status = review_status
                 
                 saved = save_record(
                     st.session_state.last_name,
@@ -1560,13 +1708,44 @@ if user_payload and chosen_prompt:
                     if saved_partial
                     else interrupted_msg
                 )
-            st.error(f"推演错误：{e}")
+            st.error(format_generation_error(e))
 
 # --- 8. 追加提问逻辑 ---
 if st.session_state.main_report:
     st.markdown("---")
     st.subheader("📜 核心能量推演报告 (Reporte Principal)")
     st.markdown(st.session_state.main_report) 
+
+    if st.session_state.get("last_review_status"):
+        st.caption(f"文案复核状态：{st.session_state.last_review_status}")
+
+    if st.button("重新复核当前报告", key="manual_review_current_report"):
+        primary_review_engine = ("快速版", api_key_live, base_url_live, model_live)
+        fallback_review_engine = ("当前引擎", api_key_full, base_url_full, model_full)
+        with st.spinner("齐大师正在重新复核当前报告..."):
+            reviewed_text, reviewed_ok, review_status = review_copy_text(
+                st.session_state.main_report,
+                primary_review_engine,
+                fallback_review_engine,
+                context_label="当前报告",
+            )
+        st.session_state.last_review_status = review_status
+        if reviewed_ok and reviewed_text.strip():
+            st.session_state.main_report = reviewed_text
+            st.success("当前报告已重新复核。")
+            saved = save_record(
+                st.session_state.get("last_name", ""),
+                st.session_state.get("last_birth", ""),
+                st.session_state.main_report,
+                st.session_state.chat_history,
+                st.session_state.current_prompt_type,
+            )
+            if saved:
+                st.rerun()
+            else:
+                st.warning(st.session_state.get("last_save_error", "复核后保存失败，请检查档案配置。"))
+        else:
+            st.warning(review_status)
 
     if st.session_state.get("last_save_error"):
         st.warning(st.session_state.last_save_error)
@@ -1640,7 +1819,7 @@ if st.session_state.main_report:
                     model=model_full,
                     messages=messages,
                     stream=False,
-                    max_tokens=4000,
+                    max_tokens=2500,
                     temperature=0.3 
                 )
                 new_answer = resp.choices[0].message.content
@@ -1656,4 +1835,4 @@ if st.session_state.main_report:
                 if saved:
                     st.rerun()
         except Exception as e:
-            st.error(f"追问失败：{e}")
+            st.error(format_generation_error(e))
