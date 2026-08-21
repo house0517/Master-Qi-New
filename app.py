@@ -239,7 +239,6 @@ _STYLE_ALIGNMENT_NOTE = """
 PROMPT_SINGLE = PROMPT_SINGLE + _BAZI_INJECT_NOTE
 PROMPT_DOUBLE = PROMPT_DOUBLE + _BAZI_INJECT_NOTE
 PROMPT_SINGLE = PROMPT_SINGLE + _STYLE_ALIGNMENT_NOTE
-PROMPT_BAZI = PROMPT_BAZI + _STYLE_ALIGNMENT_NOTE
 
 PROMPT_BRACELET = PROMPT_SINGLE + """
 
@@ -382,6 +381,8 @@ PROMPT_BAZI = """
 - 禁止用拼音替代十神。结尾提示"命理仅供参考，人生在于自身努力与选择"。
 - 若一次输出超长，请在结尾提示"内容过多，请点击追问以获取余下部分"。
 """
+
+PROMPT_BAZI = PROMPT_BAZI + _STYLE_ALIGNMENT_NOTE
 
 # --- 3. 初始化 Session State ---
 if "main_report" not in st.session_state:
