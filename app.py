@@ -1085,6 +1085,10 @@ def save_to_gsheets(name, birth, report, history, ptype="single"):
 
 def save_record(name, birth, report, history, ptype="single"):
     st.session_state.last_save_error = ""
+    if not str(report or "").strip():
+        st.session_state.last_save_error = "空报告不会写入档案库，请先重新生成正文。"
+        st.error(st.session_state.last_save_error)
+        return False
     identity_error = validate_record_identity(name, birth, ptype)
     if identity_error:
         st.error(identity_error)
@@ -1469,10 +1473,10 @@ if user_payload and chosen_prompt:
     if config_error:
         st.error(config_error)
     else:
-        st.session_state.chat_history = []
-        st.session_state.main_report = ""
         st.session_state.last_save_ok = False
         st.session_state.last_save_error = ""
+        previous_main_report = st.session_state.get("main_report", "")
+        previous_chat_history = list(st.session_state.get("chat_history", []))
         
         # 动态拼接直播间模式附加指令
         if is_live_mode or is_bracelet_request or is_fengshui_request:
@@ -1830,47 +1834,54 @@ if user_payload and chosen_prompt:
                             last_render_len = len(current_full_text)
                 
                 placeholder.markdown(current_full_text)
-                st.session_state.main_report = current_full_text
-                
-                st.session_state['last_name'] = final_name
-                st.session_state['last_birth'] = final_birth
+                if not current_full_text.strip():
+                    st.session_state.main_report = previous_main_report
+                    st.session_state.chat_history = previous_chat_history
+                    st.session_state.last_save_error = "本次生成没有返回正文，已保留上一份报告，请重试或切换更快模型。"
+                    st.error(st.session_state.last_save_error)
+                    placeholder.empty()
+                else:
+                    st.session_state.main_report = current_full_text
+                    
+                    st.session_state['last_name'] = final_name
+                    st.session_state['last_birth'] = final_birth
 
-                review_status = "已跳过文案复核。"
-                if st.session_state.get("enable_copy_review", True):
-                    primary_review_engine = ("快速版", api_key_live, base_url_live, model_live)
-                    fallback_review_engine = ("当前引擎", active_key, active_url, active_model)
-                    with st.spinner("齐大师正在做文案复核..."):
-                        reviewed_text, reviewed_ok, review_status = review_copy_text(
-                            current_full_text,
-                            primary_review_engine,
-                            fallback_review_engine,
-                            context_label="主报告",
-                        )
-                    st.session_state.last_review_status = review_status
-                    if reviewed_ok and reviewed_text.strip():
-                        current_full_text = reviewed_text
-                        st.session_state.main_report = reviewed_text
-                        placeholder.markdown(reviewed_text)
-                        st.success("文案复核完成，已修正明显语病和不顺口表达。")
+                    review_status = "已跳过文案复核。"
+                    if st.session_state.get("enable_copy_review", True):
+                        primary_review_engine = ("快速版", api_key_live, base_url_live, model_live)
+                        fallback_review_engine = ("当前引擎", active_key, active_url, active_model)
+                        with st.spinner("齐大师正在做文案复核..."):
+                            reviewed_text, reviewed_ok, review_status = review_copy_text(
+                                current_full_text,
+                                primary_review_engine,
+                                fallback_review_engine,
+                                context_label="主报告",
+                            )
+                        st.session_state.last_review_status = review_status
+                        if reviewed_ok and reviewed_text.strip():
+                            current_full_text = reviewed_text
+                            st.session_state.main_report = reviewed_text
+                            placeholder.markdown(reviewed_text)
+                            st.success("文案复核完成，已修正明显语病和不顺口表达。")
+                        else:
+                            st.warning(review_status)
                     else:
-                        st.warning(review_status)
-                else:
-                    st.session_state.last_review_status = review_status
-                
-                saved = save_record(
-                    st.session_state.last_name,
-                    st.session_state.last_birth,
-                    current_full_text,
-                    st.session_state.chat_history,
-                    st.session_state.current_prompt_type,
-                )
-                if saved:
-                    st.success("推演报告已成功保存。")
-                else:
-                    st.warning("报告已生成，但自动保存失败。当前页面已保留完整内容，请先不要刷新页面，可以在报告下方点击重新保存。")
-                if final_finish_reason == "length":
-                    st.warning("模型达到本次输出长度上限，报告可能没有完全写完。当前已生成内容已保存，可以用追问继续补全后半段。")
-                placeholder.empty()
+                        st.session_state.last_review_status = review_status
+                    
+                    saved = save_record(
+                        st.session_state.last_name,
+                        st.session_state.last_birth,
+                        current_full_text,
+                        st.session_state.chat_history,
+                        st.session_state.current_prompt_type,
+                    )
+                    if saved:
+                        st.success("推演报告已成功保存。")
+                    else:
+                        st.warning("报告已生成，但自动保存失败。当前页面已保留完整内容，请先不要刷新页面，可以在报告下方点击重新保存。")
+                    if final_finish_reason == "length":
+                        st.warning("模型达到本次输出长度上限，报告可能没有完全写完。当前已生成内容已保存，可以用追问继续补全后半段。")
+                    placeholder.empty()
 
         except Exception as e:
             if current_full_text.strip():
@@ -1891,6 +1902,9 @@ if user_payload and chosen_prompt:
                     if saved_partial
                     else interrupted_msg
                 )
+            elif not st.session_state.get("last_save_error"):
+                st.session_state.main_report = previous_main_report
+                st.session_state.chat_history = previous_chat_history
             st.error(format_generation_error(e))
 
 # --- 8. 追加提问逻辑 ---
