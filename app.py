@@ -877,6 +877,15 @@ def normalize_records_df(df):
     return df
 
 
+@st.cache_data(ttl=30, max_entries=1, show_spinner=False)
+def read_gsheets_records(worksheet):
+    """Avoid re-reading the whole archive on every Streamlit rerun."""
+    gsheets = get_gsheets_connection()
+    if not gsheets:
+        return pd.DataFrame(columns=RECORD_COLUMNS)
+    return normalize_records_df(gsheets.read(worksheet=worksheet, ttl=0))
+
+
 def history_to_text(history):
     return json.dumps(history or [], ensure_ascii=False)
 
@@ -942,7 +951,7 @@ def load_records():
     gsheets = get_gsheets_connection()
     if gsheets:
         try:
-            df = normalize_records_df(gsheets.read(worksheet=get_gsheets_worksheet(), ttl=0))
+            df = read_gsheets_records(get_gsheets_worksheet())
             df = df.sort_values("id", ascending=False)
             cloud_records = df.to_dict("records")
             local_records = load_records_from_sqlite()
@@ -1076,6 +1085,7 @@ def save_to_gsheets(name, birth, report, history, ptype="single"):
             )
 
         gsheets.update(worksheet=worksheet, data=df[RECORD_COLUMNS])
+        read_gsheets_records.clear()
         st.toast("⚡ 齐大师云端档案已同步！")
         return True
     except Exception as e:
