@@ -249,13 +249,24 @@ PROMPT_SINGLE = PROMPT_SINGLE + _BAZI_INJECT_NOTE
 PROMPT_DOUBLE = PROMPT_DOUBLE + _BAZI_INJECT_NOTE
 PROMPT_SINGLE = PROMPT_SINGLE + _STYLE_ALIGNMENT_NOTE
 
-PROMPT_BRACELET = PROMPT_SINGLE + """
+PROMPT_BRACELET = """
+# System Instruction: 齐大师 - 八字配饰直播口播
 
-## 【直播手串推荐专用补充】
-- 本模式不是完整命理报告，而是“八字快速判断 + 水晶手串推荐”的直播口播工具。
-- 输出重点是先讲命盘状态，再自然过渡到适合佩戴的配饰方向，最后落到可展示的手串。
-- 健康不作为手串推荐维度；手串只围绕事业、财富、感情、稳定防护、表达人气、综合提升来推荐。
-- 不得承诺手串可以保证发财、复合、转运或治疗疾病，只能作为能量提醒和佩戴方向。
+你是齐大师，依据用户请求中的【程序排盘预校验】生成中文直播口播稿。
+
+## 八字依据
+- 只相信程序预校验中的四柱/三柱、日主、生肖、纳音、五行、大运和出生时间。
+- 不自行改盘，不根据生日文字格式猜生肖，不补写未知时柱。
+- 先从八字状态判断需要强化或平衡的能量，再推荐配饰。
+
+## 输出要求
+- 只输出中文直播口播稿，不输出排盘过程、英文、PARTE I/II/III/IV或系统说明。
+- 先讲八字总判断，再讲事业、财富、感情或稳定防护中最相关的内容。
+- 健康不作为手串推荐维度。
+- 自然过渡到配饰，必须出现“主播此处拿出手串展示：”。
+- 只推荐一条主手串，说明一到三种材质及其现实象征意义。
+- 手串不能被说成保证发财、复合、转运、挡灾或治疗疾病。
+- 如需具体月份或更精细的佩戴判断，引导用户补充出生时间私信咨询。
 """
 
 PROMPT_FENGSHUI_LIVE = """
@@ -519,6 +530,27 @@ LIVE_QUICK_REPORT_CONSTRAINT = """
 【禁止高频套话】
 - 禁止输出：“你过去不是靠运气过日子的人”“靠自己硬撑”“适合有结果有标准有反馈的事情”“不适合混乱反复没有边界的环境”“你不是没能力”“方向收窄再加速”。
 - 禁止结尾只写“想知道更多私信我”。
+"""
+
+# 直播请求使用独立的八字规则和直播解说规则。
+# 保留排盘参考数据，确保直播模型不会脱离程序预校验自行改盘。
+LIVE_BAZI_RULES = BAZI_DATA + """
+
+## 【直播模式八字计算边界】
+- 以用户请求中的【程序排盘预校验】为最终排盘依据。
+- 不根据生日字符串重新猜生肖，不自行改写年柱、月柱、日柱、时柱或大运。
+- 如果程序只提供年月日三柱，不能补写未知时柱，也不能据此确定具体月份应期。
+- 五行判断必须综合出生季节、天干地支、地支藏气和大运，不以单个字直接断定旺衰。
+- 2026、2027的判断必须先结合原局五行和当前大运，再落到事业与财富。
+- 具体月份、合作窗口、破财窗口和精确应期，需要出生时间；没有时辰时只讲年度和阶段方向。
+"""
+
+LIVE_ENGINE_BASE = """
+你是齐大师，负责根据用户请求中的【程序排盘预校验】结果，生成中文直播口播稿。
+
+只相信程序预校验给出的四柱、生肖、纳音、五行、大运和出生时间信息，不自行改盘。
+最终只输出用户当前模式要求的正文，不输出分析过程、系统说明、英文翻译或额外备注。
+中文要适合被 TikTok 西语语音翻译：句子短，主语清楚，少用生僻术语。
 """
 
 # --- 3. 初始化 Session State ---
@@ -1248,6 +1280,8 @@ final_name = ""
 final_birth = ""
 user_payload = ""
 chosen_prompt = ""
+# 深度版需要逐月范围；直播版只接收排盘结果和年度方向，避免把深度任务说明重复送入模型。
+month_forecast_block = "" if is_live_mode else f"【月度测算区间】\n{build_month_forecast_note()}\n\n"
 
 with tab_single:
     col1, col2 = st.columns(2)
@@ -1273,12 +1307,13 @@ with tab_single:
         set_current_record_identity(final_name, final_birth, final_ptype)
         # 诉求为空时，自动转为八字全面综合测算，绝不允许跑偏成星座占星
         focus_final_s = focus_s.strip() if focus_s.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理测算】，重点覆盖事业财富、感情婚姻、健康，以及从当前月份到明年同月的月度走向，绝对围绕生辰八字展开。"
+        if is_live_mode and not focus_s.strip():
+            focus_final_s = "请依据程序预排生成直播简评，涵盖命格与五行、过去状态、当前障碍和2026-2027事业财富方向，遵循直播口播结构。"
         bazi_precheck = build_bazi_precheck(final_name, gender_s, final_birth, place_s, "个人单盘")
-        month_forecast_note = build_month_forecast_note()
         occupation_final_s = occupation_s.strip() if occupation_s.strip() else "未提供"
         user_payload = (
             f"{bazi_precheck}\n\n"
-            f"【月度测算区间】\n{month_forecast_note}\n\n"
+            f"{month_forecast_block}"
             f"【单盘请求】姓名：{final_name}, 性别：{gender_s}, 生辰：{final_birth}, 出生地：{place_s}, 职业/行业：{occupation_final_s}, 诉求：{focus_final_s}"
         )
         chosen_prompt = PROMPT_SINGLE
@@ -1348,12 +1383,13 @@ with tab_bazi:
             st.stop()
         set_current_record_identity(final_name, final_birth, final_ptype)
         focus_final_z = focus_z.strip() if focus_z.strip() else "用户未指定具体问题，请基于其八字四柱进行【全面综合命理论命】，覆盖日主旺衰、格局用神、事业财富、感情婚姻、健康，以及从当前月份到明年同月的月度走向，严格围绕生辰八字，禁止跑偏星座。"
+        if is_live_mode and not focus_z.strip():
+            focus_final_z = "请依据程序预排生成直播简评，涵盖命格与五行、过去状态、当前障碍和2026-2027事业财富方向，遵循直播口播结构。"
         alive_note = "在世（请以当前系统日期为当前时间推算流年）" if alive_z == "在世" else "已故（流年只推算到去世年为止，去世年份请在诉求中补充）"
         bazi_precheck = build_bazi_precheck(final_name, gender_z, solar_z if solar_z.strip() else lunar_z, place_z, "传统八字")
-        month_forecast_note = build_month_forecast_note()
         user_payload = (
             f"{bazi_precheck}\n\n"
-            f"【月度测算区间】\n{month_forecast_note}\n\n"
+            f"{month_forecast_block}"
             f"【中国传统八字排盘请求】\n"
             f"姓名：{name_z}\n"
             f"性别：{gender_z}\n"
@@ -1362,7 +1398,7 @@ with tab_bazi:
             f"出生地：{place_z if place_z.strip() else '未提供'}\n"
             f"在世状态：{alive_note}\n"
             f"核心诉求：{focus_final_z}\n"
-            f"请严格按系统指令中的【排盘参考数据】排出四柱、藏干、十神、大运，再依经典典籍论命。"
+            + ("请依据程序预排和系统八字规则生成直播口播，不重新排盘。" if is_live_mode else "请严格按系统指令中的【排盘参考数据】排出四柱、藏干、十神、大运，再依经典典籍论命。")
         )
         chosen_prompt = PROMPT_BAZI
 
@@ -1786,12 +1822,23 @@ if user_payload and chosen_prompt:
         else:
             live_constraint = "\n\n⚠️【重要提醒：完整版深度模式】：无需输出 PARTE 0 模块，直接从 PARTE I 开始执行高标准深度双语（西语+中文）推演。为避免接口 120 秒代理超时，本次必须控制在单次可完成长度内；优先输出核心排盘、格局、事业财富和2026关键判断。若内容过多，不要强行写完所有细节，结尾提示用户用追问继续补全 PARTE III/IV 或具体月份。"
 
+        if is_fengshui_request:
+            system_prompt = PROMPT_FENGSHUI_LIVE + live_constraint
+        elif is_bracelet_request:
+            system_prompt = LIVE_ENGINE_BASE + LIVE_BAZI_RULES + PROMPT_BRACELET + live_constraint
+        elif is_live_mode:
+            system_prompt = LIVE_ENGINE_BASE + LIVE_BAZI_RULES + live_constraint
+        else:
+            system_prompt = chosen_prompt + live_constraint
+
         client = OpenAI(api_key=active_key, base_url=active_url, timeout=600.0)
         placeholder = st.empty()
         current_full_text = ""
         last_render_at = 0.0
         last_render_len = 0
         final_finish_reason = ""
+        generation_started_at = time.monotonic()
+        generation_elapsed = None
         
         try:
             if is_fengshui_request:
@@ -1814,7 +1861,7 @@ if user_payload and chosen_prompt:
                 response = client.chat.completions.create(
                     model=active_model,
                     messages=[
-                        {"role": "system", "content": chosen_prompt + live_constraint},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_payload}
                     ],
                     stream=True,
@@ -1842,6 +1889,8 @@ if user_payload and chosen_prompt:
                             placeholder.markdown(current_full_text + "▌")
                             last_render_at = now
                             last_render_len = len(current_full_text)
+
+                generation_elapsed = time.monotonic() - generation_started_at
                 
                 placeholder.markdown(current_full_text)
                 if not current_full_text.strip():
@@ -1878,6 +1927,7 @@ if user_payload and chosen_prompt:
                     else:
                         st.session_state.last_review_status = review_status
                     
+                    save_started_at = time.monotonic()
                     saved = save_record(
                         st.session_state.last_name,
                         st.session_state.last_birth,
@@ -1885,10 +1935,16 @@ if user_payload and chosen_prompt:
                         st.session_state.chat_history,
                         st.session_state.current_prompt_type,
                     )
+                    save_elapsed = time.monotonic() - save_started_at
                     if saved:
                         st.success("推演报告已成功保存。")
                     else:
                         st.warning("报告已生成，但自动保存失败。当前页面已保留完整内容，请先不要刷新页面，可以在报告下方点击重新保存。")
+                    timing_parts = []
+                    if generation_elapsed is not None:
+                        timing_parts.append(f"API生成耗时：{generation_elapsed:.1f} 秒")
+                    timing_parts.append(f"档案保存耗时：{save_elapsed:.1f} 秒")
+                    st.caption("｜".join(timing_parts))
                     if final_finish_reason == "length":
                         st.warning("模型达到本次输出长度上限，报告可能没有完全写完。当前已生成内容已保存，可以用追问继续补全后半段。")
                     placeholder.empty()
