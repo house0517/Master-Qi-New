@@ -618,6 +618,31 @@ def validate_api_config(api_key, base_url, model, label):
     return ""
 
 
+def get_api_engines(primary_key, primary_url, primary_model, mode="live"):
+    """Build an ordered API pool. Comma/newline separated backup keys stay outside source code."""
+    engines = [("首选接口", primary_key, primary_url, primary_model)]
+    prefix = "OPENAI_LIVE" if mode == "live" else "OPENAI_FULL"
+    section_name = "openai_live" if mode == "live" else "openai_full"
+    backup_keys = get_config(section_name, "api_keys", f"{prefix}_API_KEYS", "")
+    backup_urls = get_config(section_name, "base_urls", f"{prefix}_BASE_URLS", "")
+    backup_models = get_config(section_name, "models", f"{prefix}_MODELS", "")
+    if isinstance(backup_keys, (list, tuple)):
+        backup_keys = ",".join(str(item) for item in backup_keys)
+    if isinstance(backup_urls, (list, tuple)):
+        backup_urls = ",".join(str(item) for item in backup_urls)
+    if isinstance(backup_models, (list, tuple)):
+        backup_models = ",".join(str(item) for item in backup_models)
+    keys = [item.strip() for item in backup_keys.replace("\n", ",").split(",") if item.strip()]
+    urls = [item.strip() for item in backup_urls.replace("\n", ",").split(",") if item.strip()]
+    models = [item.strip() for item in backup_models.replace("\n", ",").split(",") if item.strip()]
+    for index, key in enumerate(keys):
+        url = urls[index] if index < len(urls) else primary_url
+        model = models[index] if index < len(models) else primary_model
+        if (key, url, model) != (primary_key, primary_url, primary_model):
+            engines.append((f"备用接口 {index + 1}", key, url, model))
+    return engines
+
+
 def format_generation_error(error):
     text = str(error)
     lower_text = text.lower()
@@ -1666,7 +1691,6 @@ if user_payload and chosen_prompt:
         else:
             system_prompt = chosen_prompt + live_constraint
 
-        client = OpenAI(api_key=active_key, base_url=active_url, timeout=600.0)
         placeholder = st.empty()
         current_full_text = ""
         last_render_at = 0.0
@@ -1693,37 +1717,52 @@ if user_payload and chosen_prompt:
                     max_tokens = 2400
                 else:
                     max_tokens = 8000
-                response = client.chat.completions.create(
-                    model=active_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_payload}
-                    ],
-                    stream=True,
-                    temperature=0.8,
-                    max_tokens=max_tokens,
-                )
-                
-                for chunk in response:
-                    if chunk.choices:
-                        if chunk.choices[0].finish_reason:
-                            final_finish_reason = chunk.choices[0].finish_reason
-                        delta_content = getattr(chunk.choices[0].delta, "content", None)
-                    else:
-                        delta_content = None
-
-                    if delta_content:
-                        current_full_text += delta_content
-                        st.session_state.main_report = current_full_text
-                        now = time.monotonic()
-                        should_render = (
-                            now - last_render_at >= 0.35
-                            or len(current_full_text) - last_render_len >= 500
+                api_mode = "live" if is_live_mode else "full"
+                api_engines = get_api_engines(active_key, active_url, active_model, api_mode)
+                last_api_error = ""
+                for engine_label, engine_key, engine_url, engine_model in api_engines:
+                    try:
+                        client = OpenAI(api_key=engine_key, base_url=engine_url, timeout=120.0)
+                        response = client.chat.completions.create(
+                            model=engine_model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_payload}
+                            ],
+                            stream=True,
+                            temperature=0.8,
+                            max_tokens=max_tokens,
                         )
-                        if should_render:
-                            placeholder.markdown(current_full_text + "▌")
-                            last_render_at = now
-                            last_render_len = len(current_full_text)
+                        for chunk in response:
+                            if chunk.choices:
+                                if chunk.choices[0].finish_reason:
+                                    final_finish_reason = chunk.choices[0].finish_reason
+                                delta_content = getattr(chunk.choices[0].delta, "content", None)
+                            else:
+                                delta_content = None
+                            if delta_content:
+                                current_full_text += delta_content
+                                st.session_state.main_report = current_full_text
+                                now = time.monotonic()
+                                should_render = (
+                                    now - last_render_at >= 0.35
+                                    or len(current_full_text) - last_render_len >= 500
+                                )
+                                if should_render:
+                                    placeholder.markdown(current_full_text + "▌")
+                                    last_render_at = now
+                                    last_render_len = len(current_full_text)
+                        if current_full_text.strip():
+                            if engine_label != "首选接口":
+                                st.info(f"首选接口响应异常，已自动切换到{engine_label}。")
+                            break
+                    except Exception as api_error:
+                        last_api_error = str(api_error)
+                        if current_full_text.strip():
+                            break
+                        continue
+                if not current_full_text.strip() and last_api_error:
+                    raise RuntimeError(f"所有接口均未返回正文。最后一个接口错误：{last_api_error}")
 
                 generation_elapsed = time.monotonic() - generation_started_at
                 
