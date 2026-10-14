@@ -2,6 +2,7 @@ import ast
 import datetime
 import json
 import os
+import random
 import re
 import sqlite3
 import time
@@ -33,6 +34,313 @@ ZODIAC_BY_BRANCH = {
     "戌": "狗",
     "亥": "猪",
 }
+
+LATAM_CASE_REGIONS = [
+    "墨西哥瓜达拉哈拉",
+    "墨西哥蒙特雷",
+    "哥伦比亚波哥大",
+    "哥伦比亚麦德林",
+    "秘鲁利马",
+    "秘鲁阿雷基帕",
+    "智利圣地亚哥",
+    "阿根廷布宜诺斯艾利斯",
+    "阿根廷科尔多瓦",
+    "厄瓜多尔基多",
+    "厄瓜多尔瓜亚基尔",
+    "多米尼加圣多明各",
+]
+
+LATAM_CASE_OCCUPATIONS = [
+    "美甲师",
+    "餐饮小店店主",
+    "客服人员",
+    "中学教师",
+    "护士",
+    "商场销售",
+    "物流协调员",
+    "房产经纪",
+    "网店经营者",
+    "市场摊主",
+    "自由职业设计师",
+    "家庭照护工作者",
+]
+
+CASE_SCENARIO_POOLS = {
+    "感情关系": [
+        {
+            "name": "单身没有稳定桃花",
+            "keywords": ["单身", "没桃花", "没有桃花", "找不到对象", "没人追"],
+            "brief": "不是完全没有吸引力，而是桃花难以稳定落地。重点看火的吸引、土的落地、金的筛选。",
+            "avoid": "不要写成对方回复忽快忽慢。",
+        },
+        {
+            "name": "暧昧若即若离",
+            "keywords": ["暧昧", "忽冷忽热", "若即若离", "回复", "不主动", "不确定关系"],
+            "brief": "对方时近时远，重点看火的热度、水的猜测、金的确认关系能力。",
+            "avoid": "如果最近已经用过这个情节，必须换成别的感情场景。",
+        },
+        {
+            "name": "争吵冷战",
+            "keywords": ["吵架", "争吵", "冷战", "沟通不了", "总吵", "误会"],
+            "brief": "关系不是没有感情，而是表达方式和规则冲突。重点看火的语气、金的对错、木的弹性、水的沟通。",
+            "avoid": "不要写成暧昧对象不回复。",
+        },
+        {
+            "name": "准备分手但舍不得",
+            "keywords": ["要不要分手", "想分手", "舍不得", "继续还是结束", "分开"],
+            "brief": "重点不是谁对谁错，而是土能否承载、金能否切断消耗、水是否让人反复回头。",
+            "avoid": "不要写成单纯劝分或保证分开。",
+        },
+        {
+            "name": "想复合前任",
+            "keywords": ["复合", "前任", "回来", "挽回", "拉黑", "分手三个月"],
+            "brief": "重点看旧关系还有没有木的未来、火的互动、土的现实承诺，以及金是否只在争对错。",
+            "avoid": "不要承诺复合，不要写成对方一定回来。",
+        },
+        {
+            "name": "秘密关系或不公开关系",
+            "keywords": ["有妇之夫", "有夫之妇", "已婚", "有伴侣", "第三者", "婚外", "不能公开", "不公开"],
+            "brief": "重点看火的吸引、水的秘密牵挂、土的现实家庭结构、金的名分与边界。",
+            "avoid": "不要改写成普通桃花或普通复合。",
+        },
+        {
+            "name": "烂桃花和边界混乱",
+            "keywords": ["烂桃花", "很多人", "纠缠", "不合适的人", "边界", "越界"],
+            "brief": "重点看火带来吸引，金不足导致筛选慢，水多时容易被情绪牵住。",
+            "avoid": "不要说被诅咒或保证斩断。",
+        },
+        {
+            "name": "承诺压力和婚姻选择",
+            "keywords": ["结婚", "婚姻", "承诺", "订婚", "见家长", "责任", "名分"],
+            "brief": "重点看土的长期承载、金的关系规则、火的感情热度、木的未来方向。",
+            "avoid": "不要预断一定结婚或一定分开。",
+        },
+    ],
+    "事业发展": [
+        {
+            "name": "努力很多但不敢谈职位",
+            "keywords": ["升职", "职位", "领导", "晋升", "承担", "岗位"],
+            "brief": "重点看木的成长、火的展示、金的权责规则，以及土能不能承接职责。",
+            "avoid": "不要只写加班辛苦，要写能力怎样变成可见位置。",
+        },
+        {
+            "name": "想换工作但方向摇摆",
+            "keywords": ["换工作", "转行", "跳槽", "换方向", "赛道"],
+            "brief": "重点看木的方向、水的信息流、土的稳定感，以及火是否敢行动。",
+            "avoid": "不要写成客户压价或感情纠结。",
+        },
+        {
+            "name": "面试或展示时卡住",
+            "keywords": ["面试", "展示", "表现", "开口", "汇报", "上台"],
+            "brief": "重点看火的表达曝光、金的标准压力、水的紧张反复。",
+            "avoid": "不要写成长期职业迷茫。",
+        },
+        {
+            "name": "合作权责不清",
+            "keywords": ["合作", "合伙", "同事", "甩锅", "项目", "团队"],
+            "brief": "重点看金的边界、土的责任承载、水的信息同步、木的共同方向。",
+            "avoid": "不要写成单纯个人能力不足。",
+        },
+        {
+            "name": "自由职业接单消耗",
+            "keywords": ["自由职业", "接单", "客户", "报价", "改稿", "服务"],
+            "brief": "重点看金的报价规则、土的交付范围、火的成交表达、木的长期定位。",
+            "avoid": "不要只写办公室职场。",
+        },
+    ],
+    "财富与收入": [
+        {
+            "name": "收入不低但钱留不住",
+            "keywords": ["存不住", "留不住", "月底", "花掉", "储蓄"],
+            "brief": "重点看水的流动、土的储蓄承载、金的账目规则。",
+            "avoid": "不要写成赚不到钱。",
+        },
+        {
+            "name": "不敢报价或被压价",
+            "keywords": ["报价", "压价", "谈钱", "涨价", "收费", "价格"],
+            "brief": "重点看金的定价边界、火的价值表达、土的现实收益。",
+            "avoid": "不要写成情绪消费。",
+        },
+        {
+            "name": "冲动消费和关系支出",
+            "keywords": ["消费", "买东西", "冲动", "请客", "关系支出", "面子"],
+            "brief": "重点看火的即时冲动、水的情绪波动、土的预算承载。",
+            "avoid": "不要写成投资失败。",
+        },
+        {
+            "name": "副业机会多但散",
+            "keywords": ["副业", "兼职", "机会", "项目", "客户"],
+            "brief": "重点看水的机会流、木的方向、土的落地、金的筛选。",
+            "avoid": "不要写成固定工资问题。",
+        },
+        {
+            "name": "借钱担保和人情漏财",
+            "keywords": ["借钱", "担保", "家人要钱", "朋友", "人情", "代付"],
+            "brief": "重点看土的家庭承载、金的拒绝边界、水的人情流动。",
+            "avoid": "不要批判家人或承诺一定追回。",
+        },
+    ],
+    "家庭与安全感": [
+        {
+            "name": "搬家或居住不安",
+            "keywords": ["搬家", "房子", "租房", "住处", "居住", "换城市"],
+            "brief": "重点看土的稳定承载、水的不安流动、木的新方向。",
+            "avoid": "不要写成感情暧昧。",
+        },
+        {
+            "name": "家庭责任压住自己",
+            "keywords": ["家人", "父母", "孩子", "照顾", "家庭责任", "家里"],
+            "brief": "重点看土的责任、金的边界、水的情绪牵挂、火的自我表达。",
+            "avoid": "不要写成简单不孝或逃避责任。",
+        },
+        {
+            "name": "关系变化带来安全感波动",
+            "keywords": ["安全感", "害怕失去", "不稳定", "依靠", "依赖"],
+            "brief": "重点看土能否承载变化、水是否放大担心、金能否定规则。",
+            "avoid": "不要固定写聊天忽冷忽热。",
+        },
+        {
+            "name": "现实计划落不了地",
+            "keywords": ["计划", "落地", "执行", "坚持", "拖延"],
+            "brief": "重点看木的计划、土的落地、火的行动、金的节奏规则。",
+            "avoid": "不要写成单纯情绪问题。",
+        },
+    ],
+    "情绪与选择": [
+        {
+            "name": "夜里反复想停不下来",
+            "keywords": ["睡不着", "夜里", "反复想", "焦虑", "想太多"],
+            "brief": "重点看水的反复流动、土的承载、火的清晰表达。",
+            "avoid": "不要做医疗或心理诊断。",
+        },
+        {
+            "name": "选择太多反而不敢选",
+            "keywords": ["选择", "纠结", "不知道怎么选", "两个机会", "犹豫"],
+            "brief": "重点看水的信息过多、木的方向、金的判断标准。",
+            "avoid": "不要替用户决定唯一答案。",
+        },
+        {
+            "name": "被评价后情绪失衡",
+            "keywords": ["评价", "被说", "嫉妒", "小人", "mal de ojo", "负面能量"],
+            "brief": "重点看火的被看见、土的稳定感、金的外界评价边界。",
+            "avoid": "不要断言诅咒或邪恶攻击。",
+        },
+        {
+            "name": "开始很多但坚持不下去",
+            "keywords": ["坚持不了", "三分钟热度", "开始", "放弃", "断掉"],
+            "brief": "重点看木的生长线、火的启动、土的持续承载。",
+            "avoid": "不要写成懒惰。",
+        },
+    ],
+    "人际边界": [
+        {
+            "name": "不敢拒绝别人请求",
+            "keywords": ["拒绝", "不好意思", "帮忙", "麻烦", "占用"],
+            "brief": "重点看金的边界、土的精力承载、火的表达方式。",
+            "avoid": "不要写成事业升职故事。",
+        },
+        {
+            "name": "同事朋友越界消耗",
+            "keywords": ["同事", "朋友", "越界", "消耗", "甩锅"],
+            "brief": "重点看金的规则、土的责任范围、水的信息沟通。",
+            "avoid": "不要写成烂桃花。",
+        },
+        {
+            "name": "合作关系里利益不清",
+            "keywords": ["合伙", "分账", "合作", "利益", "合同"],
+            "brief": "重点看金的合同规则、土的利益落地、水的信息透明。",
+            "avoid": "不要承诺合作成败。",
+        },
+        {
+            "name": "害怕被讨厌所以过度解释",
+            "keywords": ["怕被讨厌", "解释", "讨好", "不敢说", "关系压力"],
+            "brief": "重点看火的表达、金的界限、水的情绪牵挂、土的自我稳定。",
+            "avoid": "不要写成单纯性格软弱。",
+        },
+    ],
+}
+
+
+def infer_case_category(issue_text="", default="情绪与选择"):
+    """Infer a broad case category from a user issue when the UI did not specify one."""
+    text = str(issue_text or "").lower()
+    category_keywords = {
+        "感情关系": ["感情", "恋爱", "桃花", "复合", "前任", "分手", "结婚", "暧昧", "已婚", "伴侣", "婚外"],
+        "事业发展": ["事业", "工作", "升职", "领导", "同事", "跳槽", "转行", "面试", "项目", "职业"],
+        "财富与收入": ["财富", "收入", "钱", "财运", "存款", "存不住", "客户", "报价", "副业", "投资"],
+        "家庭与安全感": ["家庭", "家人", "父母", "孩子", "安全感", "搬家", "房子", "住处"],
+        "人际边界": ["边界", "拒绝", "越界", "朋友", "合伙", "合作", "人际", "甩锅"],
+        "情绪与选择": ["焦虑", "纠结", "选择", "睡不着", "想太多", "害怕", "不安", "压力"],
+    }
+    for category, keywords in category_keywords.items():
+        if any(keyword in text for keyword in keywords):
+            return category
+    return default
+
+
+def choose_case_scenario(category="", issue_text=""):
+    """Choose a story subtype for any case category, with keyword priority and rotation."""
+    resolved_category = category if category in CASE_SCENARIO_POOLS else infer_case_category(issue_text)
+    pool = CASE_SCENARIO_POOLS.get(resolved_category, [])
+    text = str(issue_text or "").lower()
+
+    for scenario in pool:
+        if any(keyword.lower() in text for keyword in scenario["keywords"]):
+            return resolved_category, scenario
+
+    # If the selected category is broad but the issue clearly names another category, honor it.
+    inferred_category = infer_case_category(issue_text, resolved_category)
+    if inferred_category != resolved_category and inferred_category in CASE_SCENARIO_POOLS:
+        inferred_pool = CASE_SCENARIO_POOLS[inferred_category]
+        for scenario in inferred_pool:
+            if any(keyword.lower() in text for keyword in scenario["keywords"]):
+                return inferred_category, scenario
+        resolved_category = inferred_category
+        pool = inferred_pool
+
+    recent_key = f"recent_case_scenarios_{resolved_category}"
+    recent = list(st.session_state.get(recent_key, []))
+    candidates = [scenario for scenario in pool if scenario["name"] not in recent]
+    if not candidates:
+        recent = []
+        candidates = pool[:]
+    selected = random.choice(candidates) if candidates else {
+        "name": "五行主轴现实案例",
+        "brief": "根据当前命盘最明显的五行缺口生成具体生活场景。",
+        "avoid": "不要套用固定聊天、升职或存钱模板。",
+    }
+    st.session_state[recent_key] = (recent + [selected["name"]])[-5:]
+    return resolved_category, selected
+
+
+def format_case_scenario(category, scenario):
+    return (
+        f"案例大类：{category}。"
+        f"案例子情节：{scenario['name']}。"
+        f"情节方向：{scenario['brief']}"
+        f"避开写法：{scenario['avoid']}"
+    )
+
+
+def choose_case_background(region_override="", occupation_override=""):
+    """Rotate anonymized public backgrounds without reusing the measured person's identity."""
+    recent = list(st.session_state.get("recent_case_backgrounds", []))
+    candidates = [
+        (region, occupation)
+        for region in ([region_override] if region_override else LATAM_CASE_REGIONS)
+        for occupation in ([occupation_override] if occupation_override else LATAM_CASE_OCCUPATIONS)
+        if (region, occupation) not in recent
+    ]
+    if not candidates:
+        recent = []
+        candidates = [
+            (region, occupation)
+            for region in ([region_override] if region_override else LATAM_CASE_REGIONS)
+            for occupation in ([occupation_override] if occupation_override else LATAM_CASE_OCCUPATIONS)
+        ]
+    selected = random.choice(candidates)
+    st.session_state.recent_case_backgrounds = (recent + [selected])[-8:]
+    return selected
 
 
 def zodiac_from_ganzhi(ganzhi):
@@ -304,6 +612,115 @@ PROMPT_FENGSHUI_LIVE = """
 今天我先教你自己判断第一条。
 """
 
+PROMPT_CASE_STORY = """
+# System Instruction: TikTok 西语直播五行案例故事编剧
+
+你擅长把八字、五行和命理结构转化为适合主播直播口播的“案例故事型公共内容”。
+你的任务不是输出传统八字报告，也不是给真实用户做最终命理结论，而是根据后台选择项，生成脱敏、真实感强、适合直播讲述的五行案例故事。
+
+## 目标
+1. 让新观众产生代入感并愿意停留。
+2. 展示主播通过五行分析现实问题的能力。
+3. 自然引导观众留下出生日期和一个具体问题。
+4. 在合适时自然衔接订阅权益。
+5. 避免恐吓、绝对化承诺和平台风险表达。
+
+## 五行解释口径
+- 木：成长、方向、计划、学习、发展、行动的开始。
+- 火：表达、热情、曝光、主动性、吸引力、被看见。
+- 土：稳定、承载、安全感、储蓄、家庭、现实落地。
+- 金：规则、边界、定价、判断、决断、执行标准。
+- 水：情绪、直觉、思考、流动、深层沟通、不安和恐惧。
+
+## 内容规则
+- 必须以案例故事讲述，不得输出传统八字报告、排盘表或课程讲义。
+- 如果请求包含【程序排盘预校验】，只把它当作内部匹配五行结构的依据，不得公开姓名、完整生日、四柱或其他可识别信息。
+- 身份必须具体但脱敏，不要写“有个人”“一个女生”“一个用户”这种泛称。要写成“一个在墨西哥工作的女生”“一个三十多岁的男性”“一个做销售的用户”“一个准备换工作的年轻人”。
+- 问题必须具体，不要只说“感情不好”“事业不顺”“钱不好”。要写对方回复变慢、月底存不下钱、想换工作又怕不稳定、前任没拉黑但也不主动、客户压价却不敢拒绝等可代入场景。
+- 自然包含地区或城市氛围、职业或身份、年龄阶段、生活场景、一句用户原话和一个具体事件。
+- 所有细节必须脱敏。禁止出现真实姓名、完整生日、具体地址、公司名称、电话号码等可识别信息。
+- 故事必须包含：人物背景、具体困扰、用户原本以为的问题、五行判断、五行如何影响现实行为、明确的解决过程、温和反馈或开放式结尾、直播互动引导。
+- 故事必须有章法，参考“命理实战案例”的叙事方式，但人物和场景必须换成拉美语境。按这个顺序推进：拉美人物背景 → 咨询前的具体状态 → 触发她来咨询的事件 → 她原本以为的问题 → 命理咨询发现的五行/大运交接矛盾 → 五行平衡或能量引导过程 → 她清醒后的反馈 → 直播互动 → 订阅衔接。
+- 故事不能只是“人物—问题—建议”的平铺。必须写出“咨询前后变化”：咨询前她怎样混乱、等待、内耗或失控；咨询后她的思路怎样更清楚、怎样重新看行动和边界、怎样自己做出选择。
+- 能量引导过程只写结果导向的概述，不写成教程。禁止使用“第一步、第二步、第三步”，禁止详细交代每天几点、放什么物品、念什么句子。用2-4句说明平衡了哪些五行、做了什么类型的能量引导、符文对应什么作用即可。
+- 不要每个故事都写“我看了五行以后”。可以轮换使用：“我排完她的结构以后发现……”“她的问题落在五行里，主要是……”“从她的出生信息看，重点不在……而在……”“这个案例最关键的不是……而是……”。
+- 不制造焦虑，不说“一定发财、一定复合、保证有效、改变命运、治愈疾病”，不替代医疗、心理、法律或投资建议。
+- 结局不要写得太神。不要写“一个月就复合”“马上赚到钱”“戴了某个东西桃花就来”。反馈要真实克制，例如“不再每天盯着消息”“开始知道钱怎样流走”“意识到不是没有桃花，而是表达方式”“开始改变沟通方式”。
+- 涉及“小人、嫉妒、mal de ojo、负面能量”时，只能解释为关系模式、五行倾向、边界问题、外界评价压力或情绪消耗；不得断言诅咒、下咒或邪恶力量攻击。
+- 不得直接提 WhatsApp、付款截图或核验流程。
+- 转化目标包含“引导订阅”时，可以自然说明：订阅用户可以查看每日专属运势，并选择一次感情、事业或财富单项咨询；咨询应包含详细命盘判断、对应五行的行动方案和后续观察重点。
+- 可以写“能量引导仪式”“五行平衡练习”或“符文随身提醒”作为订阅咨询后的解决过程，但必须说明它的作用是帮助她把混乱能量拉回清醒、稳定边界和强化选择力。不得宣称仪式或符文能强制改变别人、保证复合、保证分开、发财或改变命运。
+- 感情类案例中，如果五行判断指向烂桃花、秘密关系、边界混乱或情绪依附，可以写主播为她做了五行平衡和能量引导，并给她一个“斩烂桃花”的符文作为随身提醒。后续反馈可以写成：“她后来回来告诉我，做完以后不是突然不难过，而是思路清晰多了，终于看清这段关系不该继续，于是她自己决定断开。”必须强调这是她清醒后的自主选择，不是符文强制让对方离开。
+- 案例可以写脱敏合成后的温和反馈，例如“一段时间后她回来告诉我，思路清晰多了，终于看懂这段关系，于是自己决定停止”。不得把故事包装成可核验的真实客户证言，也不得暗示所有人都会在固定时间内得到同样结果。
+- 输出西语时，使用适合墨西哥和拉美 TikTok 用户理解的自然表达。五行可解释为 “cinco elementos”，重点必须落到现实表现。
+
+## 按五行缺口匹配故事场景
+- 不能固定套用“升职后被嫉妒 / mal de ojo”模板。只有当火变亮、土不稳、外界评价压力明显，或输入主题明确指向嫉妒、小人、负面能量时，才写这类故事。
+- 缺木或木弱：重点写方向感弱、计划断、成长动力不足、换方向犹豫、学习中断、创业反复、坚持不了。常见原话：“我到底该不该换方向？”“为什么我每次开始都坚持不了？”
+- 缺火或火弱：重点写表达不足、不敢确认关系、不敢表现自己、面试紧张、作品不敢发布、感情里不敢问清楚。常见原话：“我是不是没吸引力？”“我心里很在意，但我不敢说。”
+- 火亮但土弱：重点写被看见以后心里不稳、升职/变漂亮/赚钱/曝光后害怕被评价，把 mal de ojo 解释成关注、嫉妒、边界和安全感问题。
+- 缺土或土弱：重点写安全感不足、存不住钱、家庭压力、搬家焦虑、关系一变就慌、机会来了接不稳。常见原话：“为什么我一有变化就很慌？”“钱来了也留不住。”
+- 缺金或金弱：重点写边界弱、不会定价、不敢拒绝、客户压价、同事甩锅、伴侣越界、朋友借钱。常见原话：“我明明做了很多，为什么不好意思开口谈钱？”
+- 缺水或水弱：重点写深层沟通困难、信息流不顺、情绪紧、睡前焦虑、误会不敢问、现金流卡住。常见原话：“我想问清楚，但一开口就怕关系变差。”
+- 水过旺但土或金不足：重点写想太多、消息一慢就内耗、听太多建议更乱、投资或感情摇摆、刷短视频越看越慌。
+- 双元素问题要抓主矛盾。例如“火亮土弱”写被看见后的不稳；“木强金弱”写努力很多但不会定价；“水重火弱”写感情里想很多但不敢表达；“水旺土弱”写钱流动快但留不住。
+
+## 案例库卡片逻辑
+每个案例底层都要像一张直播卡片，必须能看出：
+案例名、人物、问题、误区、五行、解释、解决过程、反馈、互动、订阅衔接。
+主播口播稿不必逐项列出这些字段，但故事内容必须覆盖这些信息。
+
+## 实战案例章法
+- 案例要像“命理实战故事”，不是像建议清单。
+- 必须有“前后对比”：咨询前的混乱状态、命理咨询中的关键发现、五行平衡后的清醒变化。
+- 必须有“转折节点”：例如她购买订阅后做单项咨询、补充出生信息后看清大运交接、做完五行平衡练习后开始不再被情绪牵着走。
+- 必须有“命理解析落点”：解释为什么这个问题不是表面原因，而是五行过旺、缺失、受压或大运交接带来的能量变化。
+- 主人公必须本地化为拉美人物，可使用墨西哥城、瓜达拉哈拉、蒙特雷、利马、波哥大、圣地亚哥、布宜诺斯艾利斯、拉美沿海城市等氛围；职业可用行政、销售、美甲师、餐饮店主、教师、客服、自由职业者、小店主等真实职业。
+- 不要出现中国城市、中国职场单位或东亚生活细节，除非用户明确要求。
+
+## 长度使用规则
+- 30秒钩子版：用于新观众刚进来，直接讲一个强代入问题、一个五行反转和一句互动引导。
+- 2分钟标准版：用于直播主循环，是默认重点。要完整覆盖人物、问题、误区、五行、人话解释、建议、反馈和互动。
+- 4分钟完整版：用于在线人数稳定时，允许把具体事件、五行现实表现和建议讲得更细，但仍然保持口播感。
+
+## 固定输出格式
+【案例标题】
+一句话标题，要有钩子和五行反转。
+
+【案例信息卡】
+地区：
+职业：
+年龄阶段：
+生活场景：
+用户原话：
+五行结构：
+案例名：
+人物：
+具体问题：
+用户误区：
+五行解释：
+实际建议：
+解决过程：
+温和反馈：
+互动入口：
+适合直播场景：
+
+【主播口播稿】
+严格按照请求中的故事长度输出：30秒钩子约100-150字；2分钟标准版约500-800字；4分钟完整版约900-1300字。
+
+【五行逻辑】
+用3-5条通俗解释案例中的五行关系，不要过度专业。
+
+【互动引导】
+输出3句直播间可直接使用的话术，引导用户留下出生日期和一个具体问题。
+
+【订阅衔接】
+转化目标包含订阅时输出2句自然衔接话术，说明订阅后会怎样进一步分析和行动；否则输出1句轻提示。不得用虚构见证或保证结果催促购买。
+
+【风险提醒】
+输出一句给主播看的内部提醒，说明这类内容不能承诺什么。
+"""
+
 
 # ==========================================
 # --- 2C. 中国传统算法系统指令 (PROMPT_BAZI) ---
@@ -443,12 +860,14 @@ LIVE_QUICK_REPORT_CONSTRAINT = """
 - 必须判断这个八字的“命格主轴/人生结构”，但不要输出复杂古籍术语堆叠。
 - 如果传统格局能清楚判断，可以说“这张盘更像是财星主导、官星主导、印星主导、食伤主导、比劫主导，或财官/印食/食伤生财这类复合结构”。
 - 如果时辰不足导致不能定死格局，要说“按目前年月日三柱看，更像是……主导”，不要装作完整四柱已经确定。
-- 命格主轴必须翻译成海外用户能懂的话：
-  财星主导 = 人生容易围绕资源、钱、交易、客户和现实选择展开。
-  官星主导 = 人生容易被工作要求、身份责任、关系承诺和外界标准推动。
-  印星主导 = 人生更靠学习、专业、证书、经验、贵人和保护力量起势。
-  食伤主导 = 人生更靠表达、内容、技术输出、销售、人气和创造力打开。
-  比劫主导 = 人生更靠自己、竞争、朋友同辈、合伙关系和独立行动推动。
+- 命格主轴不能只给抽象定义。每个主轴首次出现时，必须用2-3句生活场景解释“她会怎样想、怎样选择、最容易卡在哪里”，让没有命理基础的人也能听懂：
+  财星主导 = 她做决定时会先看收入、成本、客户和现实回报。机会来了，她会问这件事能不能带来实际结果；卡点是容易为了眼前利益承担过多。
+  官星主导 = 她很在意承诺、身份、规则和别人怎样评价她。工作里容易把领导要求当成必须完成，关系里容易把责任放在感受前面；卡点是害怕让人失望，明知不舒服也可能继续承担。
+  印星主导 = 她遇到事情会先学习、观察、找依据，也重视有经验的人是否支持她。她需要理解清楚才有安全感；卡点是准备很久、想得到认可，却可能推迟真正行动。
+  食伤主导 = 她靠表达、内容、技术、销售或创意让别人看见价值。她需要把想法说出来才有机会；卡点是情绪一来容易说得太快，或有能力却没有稳定输出。
+  比劫主导 = 她习惯靠自己，也容易受到朋友、同事、竞争和合伙关系影响。她行动不一定慢，但资源容易在人情和竞争中被分走；卡点是该合作时硬撑，该分清利益时又不好意思。
+- 两个主轴同时出现时，必须解释两股力量怎样共同作用，不能把两个定义并排念完。例如“官星和印星一起影响”要说：“她一方面很想把责任做好，不愿让别人失望；另一方面又要先确认自己做得对、有人支持，才敢行动。所以她在工作和关系里常常先忍耐、再反复确认，最后把自己的需求放到后面。”
+- 主轴解释后必须给一个与当前核心诉求直接相关的例子。用户问感情，就说明这种结构怎样影响选择伴侣、承诺和退出关系；用户问事业，就说明怎样影响求职、升职和承担责任；用户问财富，就说明怎样影响定价、风险和现金安排。
 - 命格主轴必须和当前年龄、大运阶段连起来讲。用“机会开始增加、方向正在改变、需要减少旧负担、正在积累、正在转型、把能力变成稳定收入”等直白短句描述。
 - 禁止只说“是什么格”不解释走向；必须说“这个结构到了现在这个年纪，会把重点推向哪里”。
 
@@ -456,7 +875,7 @@ LIVE_QUICK_REPORT_CONSTRAINT = """
 只输出一个标题：
 ### 📜 PARTE 0: 直播总体简单评价
 
-标题后按以下 4 个小标题输出，标题照抄：
+标题后默认按以下 4 个小标题输出，标题照抄；如果后续附加指令要求加入同类案例，则按附加指令把流年前瞻顺延为第5段：
 【1. 命格主轴与五行能量】
 【2. 过去状态回顾】
 【3. 现在的障碍】
@@ -464,13 +883,28 @@ LIVE_QUICK_REPORT_CONSTRAINT = """
 
 【1. 命格主轴与五行能量】
 - 开头先点明生肖和纳音命格，例如“她是属猴，纳音是剑锋金命”。必须引用【程序排盘预校验】里的“生肖”和“年柱纳音”，不得根据生日字符串格式自行猜。
-- 生肖和纳音只作为入口，不展开生肖性格鸡汤。
+- 生肖只作为入口，不展开生肖性格鸡汤。
+- 年柱纳音必须解释，不得只报名字。首次出现后立刻用1-2句白话说明这个纳音在传统命理里的象征。
+- 如果年柱纳音是“涧下水”，必须说明：涧下水不是大海之水，而是山涧、溪流、地下细水；它象征细腻、流动、观察力、适应力和暗中积累，也代表能量需要通道，方向不清时容易绕、容易想很多。
+- 如果是其他纳音，也要根据字面和五行象意解释，例如金类讲规则、锋利、判断或器物成形；木类讲生长、方向和根基；水类讲流动、信息和思考；火类讲光、热、表达和被看见；土类讲承载、稳定和现实落地。
 - 接着必须给命格主轴判断，例如：“这张盘按目前资料看，更像是财星和食伤一起推动的结构。”然后马上白话解释：“也就是钱、客户、表达和行动会一起影响她的人生选择。”
 - 命格主轴不能超过3句话，不能讲成课堂；重点是让观众听懂“这个人靠什么起势，又容易被什么拖住”。
 - 先给一个五行比例感，顺序固定为木、火、土、金、水，例如：木15%，火30%，土25%，金10%，水20%。
 - 比例不是科学测量，但必须体现相对强弱；明显多写25%-35%，明显少写5%-15%，中等写15%-25%。
-- 不要把五行全部长篇解释。比例之后，只挑“最多的1-2个”和“最少/最受压的1个”解释。
-- 解释必须简单：木是成长和计划，火是行动和曝光，土是稳定和现实，金是判断和边界，水是头脑、流动和钱的流动。
+- 比例之后必须分开解释“偏旺/最明显的元素”和“偏弱/缺少/受压的元素”。不能只用一句话带过。
+- 至少解释最旺的1-2个元素，以及所有明显偏弱、缺少或受压的元素。若某一方没有明显缺口，也要说明“没有完全缺失，但力量不稳在哪里”。
+- 解释格式建议使用短列表，类似：
+  五行比例大致看：木45%，火15%，土10%，金15%，水15%。
+  木占据了能量的主要部分。
+  - 木代表她自身的底气、生长力、方向感和仁慈心。
+  - 水代表支持、庇护、思考深度、信息和情绪流动。
+  - 火相对偏弱，代表才华表达、主动表现和及时行动不够稳定。
+  - 土相对偏弱，代表财富沉淀、现实收益和安全感承载不足。
+  - 金相对偏弱，代表规则边界、判断标准和拒绝能力需要加强。
+- 解释五行时，必须同时结合两个层面：第一是五行本身的人话含义；第二是它在这个命盘里的现实作用。不要只背固定定义。
+- 如果日主和十神关系清楚，可以把五行解释得更贴近命理。例如木日主遇木旺，可说“木也代表她自身的能量底气”；水旺可说“水会变成支持、学习、保护和思考”；火弱可说“表达、输出和被看见的力量不够稳定”；土弱可说“钱、收益和现实承载不够稳”；金弱可说“规则、边界和外界秩序不足”。
+- 如果日主关系不够确定，就用通用解释：木是成长和计划，火是表达和曝光，土是稳定和现实承载，金是判断和边界，水是思考、信息、流动和情绪。
+- 每个被解释的元素都要落到现实表现。比如“火偏少”不能只说主动表达少，还要补一句“所以她可能观察得很清楚，但真正开口争取会慢一步”。
 - 不能说“水有根但不强”。要说：“水不是完全没有，底下还有一点支撑，所以她有想法和机会感；但水不够稳，机会来了以后容易流动不顺，钱和信息接得住但不一定守得住。”
 
 【2. 过去状态回顾】
@@ -482,6 +916,36 @@ LIVE_QUICK_REPORT_CONSTRAINT = """
 
 【3. 现在的障碍】
 - 这是直播转化核心，要讲得具体、有命理感、有痛点。
+- 必须优先回应用户在“当前核心诉求/补充栏目”写下的具体问题。不要只做泛泛综合论命。
+- 所有补充问题都必须先做“五行命理转译”。先判断这个问题主要落在哪些五行或十神现实作用上，再回答问题。不能直接输出普通心理建议、职场建议、情感建议或人生建议。
+- 输出障碍时，每个障碍都必须采用“命盘信号 → 五行/十神含义 → 现实表现 → 建议方向”的顺序。不能只说现实问题本身。
+- 如果用户补充的是感情问题，就把它转成火、水、土、金、木在关系里的作用：
+  火：吸引力、热情、被看见、暧昧推进和冲动靠近。火不稳时，会把短暂热度误当成长期承诺。
+  水：情绪、想象、反复思考、秘密沟通和深夜消息。水过多时，会不断分析对方语气；水不足时，又很难问清事实。
+  土：现实承载、安全感、家庭结构、责任和能不能落地。土弱时，关系没有现实位置；土重时，又容易被现实婚姻和责任压住。
+  金：规则、边界、名分、选择和停止消耗的能力。金弱时，不敢提出底线；金过重时，会陷入对错审判，但不一定能抽身。
+  木：关系方向、未来成长、是否能一起往前走。木弱时，看不到下一步；木过多时，会自己想出很多未来剧情。
+- 如果用户补充的是财富问题，就把它转成水、土、金、木、火在钱里的作用：
+  水：现金流、机会流、信息流和钱的流动速度。
+  土：储蓄、承载、资产沉淀和安全感。
+  金：定价、规则、账目、合同、拒绝无效支出。
+  木：赚钱方向、长期计划、技能成长。
+  火：曝光、销售、表达、成交行动和冲动消费。
+- 如果用户补充的是事业问题，就把它转成木、火、土、金、水在事业里的作用：
+  木：方向、成长、学习、换赛道和长期路线。
+  火：表现、面试、曝光、主动争取、人气和影响力。
+  土：岗位稳定、落地执行、责任承载和团队支撑。
+  金：规则、标准、边界、职位权责和谈判能力。
+  水：信息、资源流动、适应变化和暗中机会。
+- 如果用户补充的是家庭、安全感或情绪问题，就把它转成土、水、金、火、木的作用：
+  土：安全感、家庭承载、居住稳定和现实支撑。
+  水：不安、想象、敏感、夜间内耗和深层沟通。
+  金：边界、规则、清理消耗和保护自己。
+  火：情绪表达、被看见和关系温度。
+  木：恢复方向、重新开始和日常计划。
+- 如果用户写到“爱上有妇之夫”“爱上有夫之妇”“对方已婚”“对方有伴侣”“第三者关系”“婚外感情”“不能公开的关系”，这只是感情问题里的一个具体场景。必须直接承接这个现实问题，但仍要按上面的五行机制解释，不得改写成普通桃花、普通复合或普通边界问题。
+- 每类补充问题都必须给一句清楚结论，格式类似：“她现在不是……，而是……”。这个结论必须包含五行因果。
+- 建议必须跟五行机制对应：火的问题给表达和行动节奏；水的问题给情绪确认和事实核验；土的问题给现实承载和安全结构；金的问题给规则、边界、定价和停止消耗；木的问题给方向、计划和成长路径。
 - 必须告诉用户现在最大的2-3个障碍，每个障碍都先说命盘信号，再说现实卡点。
 - 障碍不能都写压力。要按五行差异写：
   木过多：想升级、想换方向，但路线容易长出太多枝。
@@ -497,31 +961,50 @@ LIVE_QUICK_REPORT_CONSTRAINT = """
 - 必须给一句清楚结论：“她现在不是……而是……”
 
 【4. 2026-2027流年前瞻】
-- 分别以2026年、2027年组织短段落；每一年都必须覆盖事业、财富、感情、健康，不能两年合讲后漏掉某一维度。保持全文900-1300字要求，通过减少重复解释为流年前瞻留出篇幅。
-- 必须先讲十年大运：从【大运预排】里找出当前年份所在的大运，写清楚“她现在走的是XX大运，大约从XXXX年到XXXX年。这是她目前所处的十年人生阶段。”这是“大运”首次出现时的白话解释。
-- 必须判断当前是否处在阶段交接。如果当前年份距离某步大运开始或结束在1年内，就说“现在接近两个十年阶段的交接”；如果在中段，就说“这个十年阶段已经进入中段，影响会更明显”；如果接近尾声，就说“这个十年阶段接近结束，需要决定保留什么、放下什么”。
-- 必须把命格主轴和大运连起来判断当前年纪的走向，例如：“财星主导的人，走到这步运，重点不是有没有机会，而是钱从哪里来、又从哪里漏掉。”
-- 当前年纪走向必须具体到事业和财富：是适合把技能变现、从稳定工作转向副业、靠客户资源起势、重新建立边界、还是先守住现金和合作关系。
-- 不要把每个人都写成“2026机会更强，2027适合长期规划”。
-- 两年使用相同分析标准。内部结合丙午、丁未与日主的关系、出生季节、地支内部力量、当前十年阶段及实际存在的合冲刑害来判断。对外只说具体命盘信号造成的现实影响，不罗列术语。每年至少点明一个此人具体命盘依据；没有成立的关系不得编造，不能见合就说一定改变，见冲就说一定有灾。
-- 五行的生活化解释不能代替十神判断，不能把火一律解释为曝光、土一律解释为稳定。程序未提供确定的旺衰和喜忌时，须结合已有资料谨慎判断，不得把模型推断冒充程序计算结果。最终口播只给简短结论，不展示推导过程。
-- 每年事业讲工作机会或阻力及应对；财富讲收入来源或支出风险及应对。职业未提供时不要擅自假定对方经商、做内容或出售个人服务。
-- 每年感情讲关系中的支持或矛盾、相处重点与建议，结合日支及相关十神和流年的联系。关系状态未知时不假定已婚、单身或有第三者；不得断言结婚、出轨、分手必然发生。
-- 每年健康只讲可用于自我观察的作息、精力、休息与生活习惯提醒。五行与身体的对应只能作为传统文化解释，不能据此判断器官疾病、炎症、发病时间或医疗风险；有持续不适建议就医，不以手串或风水代替医疗。
-- 四个维度各用简短句子给出重点；正负面按资料支持程度表达，不为了凑齐而编事件。相同年度可以事业有机会但关系需磨合，不强行把所有维度归为整体吉或凶。
-- 比较两年各维度的变化依据，允许两年相近、2027更活跃或资料不足以分高下；不得预设2026上升、2027稳定，也不得为制造差异硬判相反结论。
+- 输出目标是直播口播，不是内部研究报告。整段控制在700-950个中文字左右；如果已经加入【同类五行案例】，本段控制在550-750字左右。
+- 必须先讲十年大运：从【大运预排】里找出2026、2027所在的大运，写清楚“她现在走的是XX大运，大约从XXXX年到XXXX年。这是她目前所处的十年人生阶段。”这是“大运”首次出现时的白话解释。
+- 不要把每个人都写成“2026机会更强，2027适合长期规划”，也不要把2026统一写成“火来了，更敢表现但容易急躁”。这是禁止使用的通用模板。
+- 两年必须使用同一套内部判断顺序，但不要把推理过程写成长篇课堂：
+  1. 先确认日主和原局强弱；
+  2. 判断丙、午、丁、未分别对应这个日主的什么十神现实作用；
+  3. 判断流年与当前大运、原局是否形成真实的合、冲、刑、害、生、克；
+  4. 再翻译成领导、同事、客户、外部机会、副业创业、感情和健康精力。
+- 每年开头用2-3句给出年度总判断。必须说清这股流年力量对她更像机会、压力、竞争、客户、责任、表达、学习支持，还是关系变化。不能只说“五行变旺”。
+- 每年必须按以下顺序自然覆盖，不要遗漏：
+  1. 当前岗位与领导关系：是否容易被领导看见、职责扩大、考核变严、升职或岗位变化；必须说明依据来自官杀、印星、食伤、财星或大运，不得凭空写升职。
+  2. 外部工作机会：是否容易出现跳槽、异地、其他平台、猎头、朋友介绍或跨行业机会；要判断是否值得换，必须比较发展空间、实际收入、管理方式和长期稳定性。
+  3. 同事、同行或合伙关系：看比劫、官杀和财星。要写清是互助、竞争、分工不清、成果归属，还是合作分利问题。
+  4. 客户、收入和财富流向：看财星、食伤生财和日主能否承受。必须说钱可能从哪里来，也可能从哪里流走；不要只写“财运变好”或“注意破财”。
+  5. 副业与创业条件：判断适合小规模试副业、扩大副业、做个人项目、合伙，还是暂时不宜辞职创业。创业不能只看热情，必须看客户、现金流、规则、合伙分工和承载力。
+  6. 感情关系：结合日支、财官、火水互动、土的落地和金的边界。关系状态未知时，分别用“单身的人”“有伴侣的人”表达，不假定已婚或有第三者，不断言结婚、分手或复合。
+  7. 健康与精力：只讲精力、睡眠、作息、用眼、久坐、情绪紧张、饮食节奏和工作劳损等生活提醒；不能用八字诊断具体疾病。持续不适要建议咨询医生。
+  8. 一句当年关键动作：例如“先小规模验证”“先谈条件再接责任”“保留现金流”“把成果留下记录”“把副业标准化”。
+- 2026年是丙午年。必须判断丙火、午火及午中藏干对该日主分别是什么十神，再决定它表现为表达曝光、同辈竞争、财富客户、领导压力、学习支持或自我力量。不能一律写成曝光增加、客户暴增或升职。
+- 2027年是丁未年。必须判断丁火、未土及未中藏干对该日主分别是什么十神，并结合当前大运。不能一律写成“稳定落地”。它可能是责任增加、资质学习、合伙分利、长期客户、家庭压力、关系定规则，也可能是消耗。
+- 如果看到升职、加薪、项目、签约、客户增加、转岗、外部邀约、副业或创业机会，必须同时说明“为什么有这个机会”和“为什么可能失去”。机会不能凭空给，风险也不能泛泛说压力大。
+- 外部工作机会不能只说“有机会”。必须说明更像来自领导推荐、同行朋友、客户转介绍、平台曝光、证书资质、跨行业机会，还是竞争环境变化。资料不足时用“更可能、倾向”。
+- 副业和创业判断必须分层：
+  适合副业 = 可用技能、表达、服务、内容、销售或客户资源小规模变现；
+  适合扩大副业 = 已有稳定客户、可重复交付、报价和流程清楚；
+  适合创业 = 现金流、客户来源、规则合同、合伙分工和长期承载都较清楚；
+  不宜创业 = 只有热情、一次机会、朋友邀约或临时订单，但规则和现金流未定。
+- 每年健康精力必须结合当年十神表现：食伤旺重表达和过度输出；官杀旺重压力、考核和紧绷；财星旺重客户、应酬和消费节奏；比劫旺重竞争、人情和体力消耗；印星旺重学习、准备和久坐。只说生活提醒，不说疾病诊断。
+- 结尾必须用一句话比较两年差异，例如：“2026更像____，2027更像____。”差异必须来自丙午、丁未、原局和大运的不同作用，不能只是换同义词。
 - 不得给具体月份建议。必须说明“月份应期要看出生时辰”，因为时柱会改变机会、破财、合作、贵人和行动窗口。
-- 私信/WhatsApp钩子不要像功能说明，要像关键缺口：
-  “她这两年不是没有财气，关键是财来的时候，会不会同时带出漏财点。到底是合作漏财、冲动花钱、家里花钱，还是选错方向，这个要看时柱。补具体出生时间私信我，我才能把2026-2027拆到月份。”
-  “直播里我只能看大方向，不能乱定月份；如果她想知道哪几个月机会最明显、哪几个月最容易破财或签错承诺，需要把几点几分，或者至少几点到几点出生补给我。”
-- 最后一段加入符合当前五行偏性的居家风水小建议，具体到哪里少放什么、哪里可以放什么；只说生活调整，不承诺转运发财。
-- 风水建议按命盘所需元素选1-2条即可：
-  需要木：东方、书桌或学习工作区保持通畅，可放健康绿植、木质物件；少堆旧纸箱和枯萎植物。
-  需要火：南方、客厅曝光区可用暖光、红色小点缀或明亮摆件；少放太多黑灰冷色和厚重遮挡。
-  需要土：房屋中心、餐厅或稳定区保持干净，可放陶瓷、方形收纳、米黄土色小物；少放杂乱移动物。
-  需要金：西方、西北方或办公区加强整洁和边界，可放金属色、白色、圆形或收纳类物件；少放破损物品。
-  需要水：北方、入口动线或工作灵感区保持流动，可放蓝黑色小物、玻璃杯、流线形摆件；少放过强灯光和红色杂物。
-  某元素过旺：不要继续在对应方位堆同类颜色、材质和物件，而是用命盘所需元素做平衡。
+
+【同类案例故事口径】
+- 如果附加指令要求加入案例，案例必须服务于当前测算人的“五行不足或承载不足带来的负面现实感受”，不是泛泛机会故事。
+- 必须先判断当前命盘最需要补的1个元素，或最不稳定、最受压的1个元素，再围绕这个元素生成案例。不要每次都写嫉妒、mal de ojo 或升职被人议论。
+- 案例场景要随五行变化：
+  缺木/木弱：方向乱、计划弱、成长线断，适合写换工作犹豫、学业中断、创业方向反复、想改变但坚持不了。
+  缺火/火弱：不敢表达、害怕被看见、主动性弱，适合写直播不敢开口、面试不敢表现、感情里不敢说需求、作品发出后立刻删除。
+  火过旺但承载不足：被看见后压力变大、容易被评价、嫉妒、mal de ojo 感受，适合写升职、变漂亮、开始赚钱、被关注后心里不稳。
+  缺土/土弱：安全感不稳、外界一句话就晃、承载不住变化，适合写存不住钱、家里压力、搬家焦虑、关系一变就恐慌。
+  缺金/金弱：边界弱、定价弱、规则弱、别人一压就退，适合写客户压价、同事甩锅、伴侣越界、朋友借钱不还、不敢拒绝。
+  缺水/水弱：情绪紧、深层沟通困难、不安和恐惧上来，适合写夜里反复想、误会后不敢问清楚、钱流不动、消息不回就焦虑。
+  水过旺但土/金不足：想太多、方向散、情绪被信息带走，适合写刷短视频越看越慌、听别人建议太多、投资/感情选择摇摆。
+- 如果两个元素都明显有问题，案例要抓“主矛盾”，比如火亮但土弱、金弱又水多、木弱又土重。不要把五行全部讲一遍。
+- 如果案例涉及嫉妒、小人、mal de ojo、负面能量，必须解释成“五行不足导致对评价、边界和安全感的反应”，不得说被诅咒、被下咒或被邪恶力量攻击。
 
 【互动点写法】
 - 最多1句，放在五行或障碍段中间，不要放在最后凑数。
@@ -573,6 +1056,20 @@ if "enable_copy_review" not in st.session_state:
     st.session_state.enable_copy_review = True
 if "last_review_status" not in st.session_state:
     st.session_state.last_review_status = ""
+if "current_case_context" not in st.session_state:
+    st.session_state.current_case_context = {}
+if "case_story_report" not in st.session_state:
+    st.session_state.case_story_report = ""
+if "case_story_record_name" not in st.session_state:
+    st.session_state.case_story_record_name = ""
+if "case_story_record_birth" not in st.session_state:
+    st.session_state.case_story_record_birth = ""
+if "case_story_save_error" not in st.session_state:
+    st.session_state.case_story_save_error = ""
+if "case_story_review_status" not in st.session_state:
+    st.session_state.case_story_review_status = ""
+if "recent_case_backgrounds" not in st.session_state:
+    st.session_state.recent_case_backgrounds = []
 
 # --- 4. 数据持久化：优先 Google Sheets，SQLite 仅作本地兜底 ---
 RECORD_COLUMNS = ["id", "name", "birth_info", "report", "history", "date", "ptype"]
@@ -640,6 +1137,18 @@ def get_api_engines(primary_key, primary_url, primary_model, mode="live"):
         model = models[index] if index < len(models) else primary_model
         if (key, url, model) != (primary_key, primary_url, primary_model):
             engines.append((f"备用接口 {index + 1}", key, url, model))
+
+    # Optional provider-level fallback. Keep DeepSeek credentials in Secrets only.
+    deepseek_key = get_config("deepseek", "api_key", "DEEPSEEK_API_KEY", "")
+    deepseek_url = get_config("deepseek", "base_url", "DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    deepseek_model = get_config(
+        "deepseek",
+        "live_model" if mode == "live" else "full_model",
+        "DEEPSEEK_LIVE_MODEL" if mode == "live" else "DEEPSEEK_FULL_MODEL",
+        "deepseek-chat",
+    )
+    if deepseek_key and deepseek_url and deepseek_model:
+        engines.append(("DeepSeek 备用接口", deepseek_key, deepseek_url, deepseek_model))
     return engines
 
 
@@ -803,6 +1312,63 @@ def format_hide_gan(values):
     return "、".join([str(v) for v in values if str(v).strip()]) or "无"
 
 
+STEM_ELEMENT = {
+    "甲": "木", "乙": "木", "丙": "火", "丁": "火",
+    "戊": "土", "己": "土", "庚": "金", "辛": "金",
+    "壬": "水", "癸": "水",
+}
+ELEMENT_ORDER = ("木", "火", "土", "金", "水")
+
+
+def build_element_structure_summary(pillars):
+    """Build a deterministic element-distribution hint from the already computed pillars.
+
+    This is not a second charting system and does not decide favorable elements. It gives the
+    model an explicit, reproducible structure so a case story cannot invent strengths merely
+    to fit its occupation or plot. Month-branch hidden qi is weighted more heavily because the
+    birth season matters; primary/secondary/tertiary hidden stems use descending weights.
+    """
+    scores = {element: 0.0 for element in ELEMENT_ORDER}
+    for title, ganzhi, _shishen, hide_gan, _nayin, _xunkong in pillars:
+        ganzhi_text = str(ganzhi or "")
+        if ganzhi_text:
+            stem_element = STEM_ELEMENT.get(ganzhi_text[0])
+            if stem_element:
+                scores[stem_element] += 1.0
+
+        hidden_values = [str(item) for item in (hide_gan or []) if str(item).strip()]
+        hidden_weights = (1.0, 0.6, 0.3)
+        season_factor = 1.5 if title == "月柱" else 1.0
+        for index, hidden_stem in enumerate(hidden_values):
+            hidden_element = STEM_ELEMENT.get(hidden_stem[0])
+            if hidden_element:
+                weight = hidden_weights[index] if index < len(hidden_weights) else 0.2
+                scores[hidden_element] += weight * season_factor
+
+    total = sum(scores.values())
+    if total <= 0:
+        return "五行结构摘要：程序未能取得可统计的天干与藏气。"
+
+    percentages = {
+        element: round(scores[element] * 100 / total)
+        for element in ELEMENT_ORDER
+    }
+    # Correct rounding drift while keeping the fixed display order.
+    percentages["水"] += 100 - sum(percentages.values())
+    ranked = sorted(ELEMENT_ORDER, key=lambda element: scores[element], reverse=True)
+    strongest = "、".join(ranked[:2])
+    weakest_score = min(scores.values())
+    weakest = "、".join(element for element in ELEMENT_ORDER if scores[element] == weakest_score)
+    missing = "、".join(element for element in ELEMENT_ORDER if scores[element] == 0) or "无完全缺失"
+    ratio_text = "，".join(f"{element}{percentages[element]}%" for element in ELEMENT_ORDER)
+    return (
+        f"程序五行结构摘要（天干＋藏气，月令加权）：{ratio_text}。"
+        f"相对较显：{strongest}；相对最少：{weakest}；完全未见：{missing}。\n"
+        "使用边界：这是同一命盘内部的相对分布，用于约束五行故事选题；"
+        "最终旺衰仍须结合日主、月令、生克制化和大运。不得把相对较显直接写成喜神或吉凶。"
+    )
+
+
 def build_bazi_precheck(name, gender, birth, place="", label="命主"):
     if Solar is None:
         return "【程序排盘预校验】未启用：缺少 lunar-python 依赖。请检查 requirements.txt 是否已包含 lunar-python==1.4.8。"
@@ -842,6 +1408,7 @@ def build_bazi_precheck(name, gender, birth, place="", label="命主"):
     pillar_lines = []
     for title, ganzhi, shishen, hide_gan, nayin, xunkong in pillars:
         pillar_lines.append(f"- {title}：{ganzhi}｜十神：{shishen}｜藏干：{format_hide_gan(hide_gan)}｜纳音：{nayin}｜旬空：{xunkong}")
+    element_structure_summary = build_element_structure_summary(pillars)
 
     dayun_lines = []
     for dayun in yun.getDaYun()[:9]:
@@ -886,6 +1453,8 @@ def build_bazi_precheck(name, gender, birth, place="", label="命主"):
 {detail_title}：
 {chr(10).join(pillar_lines)}
 
+{element_structure_summary}
+
 大运预排：
 {chr(10).join(dayun_lines)}
 
@@ -907,7 +1476,11 @@ def get_gsheets_worksheet():
 def has_gsheets_secrets():
     try:
         connections = st.secrets.get("connections", {})
-        return bool(connections.get("gsheets")) and GSheetsConnection is not None
+        gsheets_config = connections.get("gsheets", {})
+        if not hasattr(gsheets_config, "get") or GSheetsConnection is None:
+            return False
+        required_fields = ("spreadsheet", "client_email", "private_key")
+        return all(str(gsheets_config.get(field, "")).strip() for field in required_fields)
     except Exception:
         return False
 
@@ -1056,7 +1629,7 @@ def restore_record_to_session(record):
     st.session_state.last_birth = str(record.get("birth_info", "") or "")
 
     saved_ptype = record.get("ptype") or None
-    if saved_ptype in ("single", "double", "bazi", "bracelet", "fengshui"):
+    if saved_ptype in ("single", "double", "bazi", "bracelet", "fengshui", "case_story"):
         st.session_state.current_prompt_type = saved_ptype
     elif "&" in st.session_state.last_name:
         st.session_state.current_prompt_type = "double"
@@ -1174,6 +1747,18 @@ def save_record(name, birth, report, history, ptype="single"):
         st.session_state.last_save_error = "云端和本地保存都失败。本次结果已保留在当前页面，请先不要刷新页面。"
     return saved_local
 
+
+def save_case_story_record(name, birth, report):
+    """Save a public case without replacing the active personal report's save state."""
+    previous_save_ok = st.session_state.get("last_save_ok", False)
+    previous_save_error = st.session_state.get("last_save_error", "")
+    saved = save_record(name, birth, report, [], "case_story")
+    case_error = st.session_state.get("last_save_error", "")
+    st.session_state.last_save_ok = previous_save_ok
+    st.session_state.last_save_error = previous_save_error
+    st.session_state.case_story_save_error = case_error
+    return saved
+
 # --- 5. 侧边栏 ---
 with st.sidebar:
     st.title("🔮 接口高级配置")
@@ -1233,6 +1818,12 @@ with st.sidebar:
         value=True,
         disabled=not is_live_mode,
         help="只影响直播快速简评的表达结构，不改变排盘和命理计算。开启后会生成 2.5-3.5 分钟的自然口播稿，并在正文中加入互动点。",
+    )
+    include_live_case_story = st.toggle(
+        "直播测算自动加入缺失五行负面案例故事",
+        value=True,
+        disabled=not is_live_mode,
+        help="根据当前测算人的五行缺口、承载不足和核心诉求，在同一篇直播口播稿中加入一个脱敏负面现实案例。案例不是当前用户的真实经历。",
     )
     st.toggle(
         "生成后自动文案复核",
@@ -1294,18 +1885,23 @@ with st.sidebar:
 # --- 6. 主界面 ---
 st.title("🕯️ Maestro Qi: Alquimia de Destino")
 
-tab_single, tab_double, tab_bazi, tab_bracelet, tab_fengshui = st.tabs([
+tab_single, tab_double, tab_bazi, tab_bracelet, tab_fengshui, tab_case_story = st.tabs([
     "👤 个人能量推演 (Lectura Individual)",
     "💞 双人命运合盘 (Sinastría de Destino)",
     "🀄 中国传统算法 (Bazi Clásico)",
     "📿 直播手串推荐",
-    "🏠 直播风水开场"
+    "🏠 直播风水开场",
+    "🎙️ 五行案例故事",
 ])
 
 final_name = ""
 final_birth = ""
+final_ptype = ""
 user_payload = ""
 chosen_prompt = ""
+case_story_length = ""
+case_output_language = ""
+case_story_output_slot = None
 # 深度版需要逐月范围；直播版只接收排盘结果和年度方向，避免把深度任务说明重复送入模型。
 month_forecast_block = "" if is_live_mode else f"【月度测算区间】\n{build_month_forecast_note()}\n\n"
 
@@ -1337,6 +1933,14 @@ with tab_single:
             focus_final_s = "请依据程序预排生成直播简评，涵盖命格与五行、过去状态、当前障碍；2026和2027每年分别覆盖事业、财富、感情与健康提醒，遵循直播口播结构。"
         bazi_precheck = build_bazi_precheck(final_name, gender_s, final_birth, place_s, "个人单盘")
         occupation_final_s = occupation_s.strip() if occupation_s.strip() else "未提供"
+        st.session_state.current_case_context = {
+            "name": final_name,
+            "birth": final_birth,
+            "gender": gender_s,
+            "region": place_s.strip(),
+            "occupation": occupation_final_s,
+            "issue": focus_s.strip(),
+        }
         user_payload = (
             f"{bazi_precheck}\n\n"
             f"{month_forecast_block}"
@@ -1413,6 +2017,14 @@ with tab_bazi:
             focus_final_z = "请依据程序预排生成直播简评，涵盖命格与五行、过去状态、当前障碍；2026和2027每年分别覆盖事业、财富、感情与健康提醒，遵循直播口播结构。"
         alive_note = "在世（请以当前系统日期为当前时间推算流年）" if alive_z == "在世" else "已故（流年只推算到去世年为止，去世年份请在诉求中补充）"
         bazi_precheck = build_bazi_precheck(final_name, gender_z, solar_z if solar_z.strip() else lunar_z, place_z, "传统八字")
+        st.session_state.current_case_context = {
+            "name": final_name,
+            "birth": final_birth,
+            "gender": gender_z,
+            "region": place_z.strip(),
+            "occupation": "",
+            "issue": focus_z.strip(),
+        }
         user_payload = (
             f"{bazi_precheck}\n\n"
             f"{month_forecast_block}"
@@ -1460,6 +2072,14 @@ with tab_bracelet:
         set_current_record_identity(final_name, final_birth, final_ptype)
         focus_final_r = focus_r.strip() if focus_r.strip() else "用户未补充具体问题，请基于八字状态做直播手串推荐，重点围绕事业、财富、感情、稳定防护或综合提升给出初步佩戴方向。"
         bazi_precheck = build_bazi_precheck(final_name, gender_r, final_birth, place_r, "直播手串推荐")
+        st.session_state.current_case_context = {
+            "name": final_name,
+            "birth": final_birth,
+            "gender": gender_r,
+            "region": place_r.strip(),
+            "occupation": "",
+            "issue": focus_r.strip(),
+        }
         user_payload = (
             f"{bazi_precheck}\n\n"
             f"【直播手串推荐请求】\n"
@@ -1526,12 +2146,177 @@ with tab_fengshui:
         )
         chosen_prompt = PROMPT_FENGSHUI_LIVE
 
+with tab_case_story:
+    st.markdown("#### 🎙️ 五行案例故事 · TikTok 直播公共内容")
+    st.caption("可手动设置案例，也可匹配最近一次测算人的五行结构。公开稿会自动脱敏，不展示姓名、完整生日或四柱。")
+
+    saved_case_context = st.session_state.get("current_case_context", {})
+    has_current_person = bool(
+        saved_case_context.get("birth") or st.session_state.get("last_birth")
+    )
+    match_current_person = st.toggle(
+        "匹配当前测算人的故事",
+        value=has_current_person,
+        disabled=not has_current_person,
+        key="case_match_current_person",
+        help="匹配四柱/三柱、日主、生肖、纳音、大运、五行矛盾、性别和当前诉求；公开人物的姓名、生日、城市、职业会脱敏或重新生成。",
+    )
+    if match_current_person:
+        matched_label = saved_case_context.get("name") or st.session_state.get("last_name") or "最近测算人"
+        st.info(f"当前匹配来源：{matched_label}。姓名和完整生日不会写入公开案例。")
+        st.caption(
+            "匹配维度：命盘结构、五行强弱与受压关系、大运阶段、性别、核心诉求。"
+            "不复制维度：真实姓名、完整生日、真实职业、真实城市和真实经历。"
+        )
+
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        story_category = st.selectbox(
+            "故事大类",
+            ["事业发展", "财富与收入", "感情关系", "家庭与安全感", "情绪与选择", "人际边界"],
+            key="case_story_category",
+        )
+        specific_issue = st.text_input(
+            "细分问题",
+            value=saved_case_context.get("issue", "") if match_current_person else "",
+            placeholder="例：工作努力却一直不敢谈加薪",
+            key="case_specific_issue",
+        )
+        life_scene = st.text_input(
+            "生活场景",
+            placeholder="例：下班后反复修改一封加薪邮件",
+            key="case_life_scene",
+        )
+        case_gender = st.selectbox(
+            "用户性别",
+            ["女性", "男性", "不强调性别"],
+            index=(
+                0 if "女" in str(saved_case_context.get("gender", ""))
+                else 1 if "男" in str(saved_case_context.get("gender", ""))
+                else 2
+            ),
+            key="case_gender",
+        )
+        age_stage = st.selectbox(
+            "年龄阶段",
+            ["20-29岁", "30-39岁", "40-49岁", "50-59岁", "60岁以上"],
+            key="case_age_stage",
+        )
+    with col_c2:
+        region = st.text_input(
+            "地区场景",
+            value="",
+            placeholder="留空时自动轮换拉美城市；也可手动指定",
+            key="case_region",
+        )
+        occupation = st.text_input(
+            "职业身份",
+            value="",
+            placeholder="留空时自动轮换拉美职业；也可手动指定",
+            key="case_occupation",
+        )
+        five_element_pattern = st.text_input(
+            "五行结构",
+            placeholder="例：火旺金弱；留空时由当前测算人的排盘自动匹配",
+            key="case_five_element_pattern",
+        )
+        case_story_length = st.selectbox(
+            "故事长度",
+            ["30秒钩子", "2分钟标准版", "4分钟完整版"],
+            index=1,
+            key="case_story_length",
+        )
+        conversion_goal = st.selectbox(
+            "转化目标",
+            ["引导留言出生日期和问题", "引导订阅", "展示五行分析能力", "互动留人 + 引导订阅"],
+            key="case_conversion_goal",
+        )
+        case_output_language = st.selectbox(
+            "输出语言",
+            ["西语", "中文", "西语 + 中文对照"],
+            key="case_output_language",
+        )
+
+    if st.button("生成五行案例故事", key="generate_case_story"):
+        context_name = saved_case_context.get("name") or st.session_state.get("last_name", "")
+        context_birth = saved_case_context.get("birth") or st.session_state.get("last_birth", "")
+        if match_current_person and not context_birth:
+            st.error("当前没有可匹配的生辰资料，请先完成一次个人测算，或关闭匹配功能并手动填写五行结构。")
+            st.stop()
+        if not match_current_person and not five_element_pattern.strip():
+            st.error("手动创建案例时，请填写五行结构；或者开启“匹配当前测算人的故事”。")
+            st.stop()
+
+        now_label = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        final_name, final_birth, final_ptype = normalize_record_identity(
+            f"案例故事-{story_category}-{now_label}",
+            f"脱敏案例 | {now_label}",
+            "case_story",
+        )
+        public_region, public_occupation = choose_case_background(
+            region.strip(),
+            occupation.strip(),
+        )
+        case_issue_text = (
+            specific_issue.strip()
+            or life_scene.strip()
+            or saved_case_context.get("issue", "")
+        )
+        selected_case_category, selected_case_scenario = choose_case_scenario(
+            story_category,
+            case_issue_text,
+        )
+        case_scenario_instruction = format_case_scenario(
+            selected_case_category,
+            selected_case_scenario,
+        )
+        matched_precheck = ""
+        if match_current_person:
+            matched_gender = saved_case_context.get("gender") or case_gender
+            matched_region = saved_case_context.get("region", "")
+            matched_precheck = build_bazi_precheck(
+                context_name or "案例原型",
+                matched_gender,
+                context_birth,
+                matched_region,
+                "案例故事内部匹配",
+            )
+        pattern_request = (
+            five_element_pattern.strip()
+            if five_element_pattern.strip()
+            else "请依据程序排盘预校验，提炼最适合这个现实问题的五行主轴；不要公开四柱或完整生日。"
+        )
+        user_payload = (
+            f"{matched_precheck}\n\n" if matched_precheck else ""
+        ) + (
+            "【五行案例故事请求】\n"
+            f"故事大类：{story_category}\n"
+            f"程序匹配后的案例大类：{selected_case_category}\n"
+            f"案例子情节指令：{case_scenario_instruction}\n"
+            "必须围绕这个子情节生成故事，不得退回最常见模板；如果用户补充问题与原大类冲突，以程序匹配后的案例大类和子情节为准。\n"
+            f"细分问题：{specific_issue.strip() or '请结合故事大类生成一个具体、可信的问题'}\n"
+            f"生活场景：{life_scene.strip() or '请生成一个符合地区和职业的日常具体场景'}\n"
+            f"用户性别：{case_gender}\n"
+            f"年龄阶段：{age_stage}\n"
+            f"公开案例地区：{public_region}\n"
+            f"公开案例职业：{public_occupation}\n"
+            "公开人物背景已经由程序轮换选定，必须使用上述地区和职业，不得改回墨西哥城行政人员。\n"
+            f"五行结构：{pattern_request}\n"
+            f"故事长度：{case_story_length}\n"
+            f"转化目标：{conversion_goal}\n"
+            f"输出语言：{case_output_language}\n"
+            "请严格按案例故事格式输出，并确保所有公开细节脱敏。"
+        )
+        chosen_prompt = PROMPT_CASE_STORY
+    case_story_output_slot = st.container()
+
 # --- 7. 动态匹配执行与数据持久化 ---
 if user_payload and chosen_prompt:
     # 根据直播开关，选择对应引擎的 Key / URL / 模型
-    is_bracelet_request = st.session_state.current_prompt_type == "bracelet"
-    is_fengshui_request = st.session_state.current_prompt_type == "fengshui"
-    if is_live_mode or is_bracelet_request or is_fengshui_request:
+    is_bracelet_request = final_ptype == "bracelet"
+    is_fengshui_request = final_ptype == "fengshui"
+    is_case_story_request = final_ptype == "case_story"
+    if is_live_mode or is_bracelet_request or is_fengshui_request or is_case_story_request:
         active_key, active_url, active_model = api_key_live, base_url_live, model_live
     else:
         active_key, active_url, active_model = api_key_full, base_url_full, model_full
@@ -1540,18 +2325,22 @@ if user_payload and chosen_prompt:
         active_key,
         active_url,
         active_model,
-        "快速版" if (is_live_mode or is_bracelet_request or is_fengshui_request) else "完整版",
+        "快速版" if (is_live_mode or is_bracelet_request or is_fengshui_request or is_case_story_request) else "完整版",
     )
     if config_error:
         st.error(config_error)
     else:
-        st.session_state.last_save_ok = False
-        st.session_state.last_save_error = ""
+        if is_case_story_request:
+            st.session_state.case_story_save_error = ""
+        else:
+            st.session_state.last_save_ok = False
+            st.session_state.last_save_error = ""
         previous_main_report = st.session_state.get("main_report", "")
         previous_chat_history = list(st.session_state.get("chat_history", []))
+        previous_case_story_report = st.session_state.get("case_story_report", "")
         
         # 动态拼接直播间模式附加指令
-        if is_live_mode or is_bracelet_request or is_fengshui_request:
+        if is_live_mode or is_bracelet_request or is_fengshui_request or is_case_story_request:
             if is_fengshui_request:
                 live_constraint = """
 
@@ -1677,12 +2466,99 @@ if user_payload and chosen_prompt:
 
 直播里我只能先给一个方向，真正要定到最适合她的手串，还是要看完整八字和具体出生时间。
 """
+            elif is_case_story_request:
+                live_constraint = "\n\n当前是独立的五行案例故事模式。只输出案例故事固定结构，不输出传统命理报告或 PARTE 模块。"
             else:
                 live_constraint = LIVE_QUICK_REPORT_CONSTRAINT
+                include_embedded_case = (
+                    include_live_case_story
+                    and st.session_state.current_prompt_type in ("single", "bazi")
+                )
+                if include_embedded_case:
+                    embedded_case_region, embedded_case_occupation = choose_case_background()
+                    embedded_issue = st.session_state.get("current_case_context", {}).get("issue", "")
+                    embedded_case_category = infer_case_category(embedded_issue)
+                    embedded_case_category, embedded_case_scenario = choose_case_scenario(
+                        embedded_case_category,
+                        embedded_issue,
+                    )
+                    embedded_scenario_instruction = format_case_scenario(
+                        embedded_case_category,
+                        embedded_case_scenario,
+                    )
+                    live_constraint += """
+
+【直播测算内嵌案例｜覆盖上方四段结构】
+- 本次直播稿必须在【3. 现在的障碍】之后增加【4. 同类五行案例】，原【4. 2026-2027流年前瞻】顺延为【5. 2026-2027流年前瞻】。
+- 全文控制在1200-1600字左右。通过压缩重复解释留出案例篇幅，不删掉事业、财富、感情和健康四个年度维度。
+- 案例必须从当前测算人的“五行缺口、受压元素、承载不足点”和核心诉求中提炼，重点讲缺少或不稳的元素怎样带出负面现实感受，不能写成普通机会故事。
+- 无论用户有没有填写补充问题，案例都必须根据本次【程序排盘预校验】里的真实五行旺衰来写。不得为了配合故事职业，自行编造“金很强、火弱、土弱”等命盘中没有的关系。
+- 用户没有填写补充问题时，不得随机选择一个通用职场困扰。必须先从排盘中找出“最旺或使用过度的1个元素”与“最弱、缺失或受压的1-2个元素”，再依据它们对当前日主的现实作用，选择事业、财富、感情、家庭或情绪中的主场景。
+- 用户填写了普通陈述而不是问句时，也要把这段陈述当作核心诉求，先与真实命盘交叉验证，再选故事；不能因为句子没有问号就忽略它。
+- 案例的命理分析必须形成完整链条：排盘证据 → 旺弱/受压关系 → 生克或承接关系 → 现实行为 → 对应的五行平衡方向。至少明确讲出一条关系，例如“水过旺而土弱，流动太快，土接不住”“木旺而金弱，成长很多，但规则和边界不能修剪”“火弱而水重，心里反复思考，却难以及时表达”。
+- 案例里至少有一句明确回扣本次命盘依据，例如：“这张盘里真正明显的是水偏旺、火偏弱，所以同类案例要讲想得多但表达慢。”只能使用程序预校验中确实存在的旺弱关系；公开口播时不得泄露四柱、完整生日或姓名。
+- 案例必须根据五行结构自动换情境，不得固定套用“升职后被嫉妒 / mal de ojo”模板。只有当火变亮、土不稳、关系评价压力明显，或用户诉求指向嫉妒/小人/负面能量时，才使用这类案例。
+- 开头必须明确说“我之前遇到过一个五行缺口很相近的脱敏案例”，不得暗示这是当前测算人的真实经历。
+- 案例控制在350-550字，按“2分钟标准版”的核心结构压缩写，像主播自然讲故事，不写成报告。
+- 案例必须按“拉美人物背景—咨询前状态—触发咨询的事件—用户误区—五行/大运矛盾—命理咨询后的能量平衡—清醒后的反馈—直播互动—订阅衔接”的顺序讲清楚。
+- 人物身份必须具体但脱敏，不能写“有个人”“一个女生”“一个用户”。要写成“一个在墨西哥工作的女生”“一个三十多岁的男性”“一个做销售的用户”“一个准备换工作的年轻人”等。
+- 具体问题必须可代入，不能只写“感情不好”“财运不好”“事业不顺”。要有一个现实动作，例如消息回复变慢、月底存不下钱、客户临时加需求、想换工作又怕不稳定、前任没拉黑但也不主动。
+- 案例必须包含：拉美地区或城市氛围、普通职业/身份、年龄阶段、一个具体生活场景、一句人物原话、一个具体事件、她原本以为的问题、真正的五行缺口、这个缺口如何放大负面感受、一个实际建议，以及温和的开放式结果。
+- 优先使用用户请求中已经提供的地区、职业和核心诉求做同类匹配；资料未提供时可以生成合理的普通背景，但不能假定当前测算人的职业、婚姻状态或真实经历。
+- 所有同类案例都必须先把“核心诉求/补充栏目”转成五行命理矛盾，再写故事。不能先写现实故事，最后才硬加一句五行。
+- 案例中的“五行反转”必须清楚：用户原本以为是某个表面问题，真正卡点是某个元素过旺、偏弱、受压，或两个元素配合失衡。
+- 五行反转不能只是贴标签。必须解释两个元素怎样相互影响，以及为什么会造成故事中的具体行为。只写“金代表规则、火代表表达、土代表承载”视为不合格。
+- 不同补充问题要匹配不同五行案例：
+  感情问题：看火的吸引和表达、水的情绪和沟通、土的稳定和现实承载、金的边界和名分、木的未来方向。
+  财富问题：看水的现金流、土的储蓄承载、金的定价规则、木的长期计划、火的销售和冲动消费。
+  事业问题：看木的方向成长、火的表现曝光、土的岗位落地、金的标准权责、水的信息资源。
+  家庭与安全感：看土的承载、水的不安、金的边界、火的表达温度、木的恢复方向。
+  情绪选择：看水是否过旺、火是否不足、土是否不稳、金是否缺判断、木是否缺方向。
+- 如果核心诉求/补充栏目出现“爱上有妇之夫、爱上有夫之妇、对方已婚、对方有伴侣、第三者关系、婚外感情、不能公开的关系”，案例必须匹配这个关系结构，不能改写成普通暧昧、普通复合或普通桃花故事。这只是感情类案例中的一个具体场景。
+- 涉及已婚/有伴侣对象时，案例必须从五行讲关系机制，而不是只讲道德或边界：
+  火解释为吸引、热度、暧昧推进、被对方看见的感觉；
+  水解释为深夜消息、反复猜测、情绪牵挂、秘密沟通；
+  土解释为现实家庭结构、责任、安全感、关系能不能落地；
+  金解释为名分、规则、界限、是否敢提出底线和停止消耗。
+- 每个案例都必须有一句五行因果反转。例如：“她以为是自己不够有吸引力，其实是火已经把人拉近了，但土和金没有给这段关系稳定位置。”财富、事业、家庭和情绪案例也要按同样逻辑改写。
+- 每个案例的建议不能只说泛泛建议。必须对应元素：火给表达和行动节奏；水给事实核验和情绪停顿；土给现实承载和稳定安排；金给规则边界和停止消耗；木给方向计划和下一步。
+- 建议或能量引导必须点明五行目的：是在补不足、稳承载、泄过旺，还是加强边界。不得只给排班、记账、沟通等普通行动建议，却不说明它对应哪一股命盘能量。
+- 每个案例必须体现“命理咨询前后变化”。咨询前写她怎样被失衡的五行牵动；咨询后写主播依据命盘做了什么五行平衡或能量引导，以及她怎样变得更清醒。
+- 能量引导过程必须简写，不能写成操作教程。禁止“第一步、第二步、第三步”，禁止详细写每天几点、摆放物品或念诵内容。用2-4句说明收什么过旺能量、补什么不足能量、符文或仪式对应什么作用即可。
+- 案例可以自然衔接订阅服务：订阅用户可查看每日专属运势，并选择一次感情、事业或财富单项咨询；单项咨询包括更仔细的命盘分析、针对五行问题的行动方案和后续观察重点。
+- 感情类案例若指向烂桃花、秘密关系或边界混乱，可以写主播做了五行平衡和能量引导，并给出斩烂桃花符文随身携带。要说明平衡的五行作用，但不得宣称符文强制改变对方。
+- 案例可以使用脱敏合成后的温和反馈：“一段时间后她回来告诉我，思路清晰多了，终于看懂这段关系，于是自己决定停止。”不得包装成可核验的真实客户证言，也不得暗示所有人都会在固定时间内得到相同结果。
+- 每个案例的反馈要克制：可以写“她开始看行动是否一致”“减少深夜等消息”“开始知道钱怎样流走”“不再把等待当成关系推进”“把方向缩小到可执行的一步”，不能写“最后上位”“一定分开”“一定复合”“马上发财”。
+- 案例中的问题要像直播间真实咨询，并按五行选择不同主题：
+  缺木写“我到底该不该换方向 / 为什么总坚持不了”；
+  缺火写“我是不是没吸引力 / 为什么不敢表现自己”；
+  火亮土弱写“是不是被嫉妒、mal de ojo、被别人盯着”；
+  缺土写“为什么总没安全感 / 一有变化就慌”；
+  缺金写“为什么总被压价、被越界、不敢拒绝”；
+  缺水写“为什么我总想太多、睡前焦虑、沟通问不出口”。
+- 案例必须先讲“她以为的问题”，再转成“真正的五行结构问题”。不同五行要给不同解释，不得全部写成外界嫉妒。
+- 双元素问题要抓主矛盾：水重火弱写“想很多但不敢表达”；水旺土弱写“钱和机会流动快但留不住”；木强金弱写“努力很多但不会定价”；火亮土弱写“被看见以后心里不稳”；金重木弱写“讲道理太硬，关系缺少弹性”。
+- 案例建议必须跟五行缺口对应：缺木给三步计划；缺火给小范围表达练习；缺土给稳定作息和财务边界；缺金给拒绝话术、定价和规则；缺水给延迟反应、写下情绪和问清事实。不能承诺转运、发财或复合。
+- 反馈必须克制可信，不写“照做以后马上复合/马上赚到钱/命运改变”。要写“至少不再每天盯着消息”“开始知道钱怎样流走”“意识到不是没有桃花，而是表达方式”“开始改变和前任沟通的方式”这类温和结果。
+- 不要每个案例都用“我看了五行以后”。可轮换：“我排完她的结构以后发现……”“她的问题落在五行里，主要是……”“从她的出生信息看，重点不在……而在……”“这个案例最关键的不是……而是……”。
+- 案例必须完全脱敏，不出现当前用户姓名、完整生日、四柱、具体地址、公司名称或联系方式。
+- 不得说一定发财、一定复合、保证有效、改变命运或治愈疾病。涉及嫉妒、小人、mal de ojo、负面能量时，只解释为边界、关系模式、评价压力或情绪消耗。
+- 案例结尾自然接直播互动：“如果你最近也有这种感觉，可以在评论区留下出生日期，再加一个你现在最想解决的问题。”随后用1-2句说明订阅后能得到的具体分析和行动指导，不得只喊“订阅”，也不得承诺结果。
+"""
+                    live_constraint += (
+                        f"\n- 本次内嵌案例的公开人物背景固定为：{embedded_case_region}，"
+                        f"职业是{embedded_case_occupation}。必须使用这组背景，不得改成墨西哥城行政人员。"
+                    )
+                    live_constraint += (
+                        f"\n- 本次内嵌案例的故事子情节固定为：{embedded_scenario_instruction}"
+                        "必须围绕这个子情节写，不得退回聊天忽冷忽热、升职被嫉妒或存不住钱等默认模板，除非该子情节本身如此。"
+                    )
         else:
             live_constraint = "\n\n⚠️【重要提醒：完整版深度模式】：无需输出 PARTE 0 模块，直接从 PARTE I 开始执行高标准深度双语（西语+中文）推演。为避免接口 120 秒代理超时，本次必须控制在单次可完成长度内；优先输出核心排盘、格局、事业财富和2026关键判断。若内容过多，不要强行写完所有细节，结尾提示用户用追问继续补全 PARTE III/IV 或具体月份。"
 
-        if is_fengshui_request:
+        if is_case_story_request:
+            system_prompt = PROMPT_CASE_STORY + live_constraint
+        elif is_fengshui_request:
             system_prompt = PROMPT_FENGSHUI_LIVE + live_constraint
         elif is_bracelet_request:
             system_prompt = LIVE_ENGINE_BASE + LIVE_BAZI_RULES + PROMPT_BRACELET + live_constraint
@@ -1691,7 +2567,11 @@ if user_payload and chosen_prompt:
         else:
             system_prompt = chosen_prompt + live_constraint
 
-        placeholder = st.empty()
+        placeholder = (
+            case_story_output_slot.empty()
+            if is_case_story_request and case_story_output_slot is not None
+            else st.empty()
+        )
         current_full_text = ""
         last_render_at = 0.0
         last_render_len = 0
@@ -1700,7 +2580,9 @@ if user_payload and chosen_prompt:
         generation_elapsed = None
         
         try:
-            if is_fengshui_request:
+            if is_case_story_request:
+                spinner_msg = "正在匹配五行结构并生成脱敏案例故事..."
+            elif is_fengshui_request:
                 spinner_msg = "齐大师正在生成直播风水开场话术..."
             elif is_bracelet_request:
                 spinner_msg = "齐大师正在生成直播手串推荐话术..."
@@ -1709,7 +2591,13 @@ if user_payload and chosen_prompt:
             else:
                 spinner_msg = "齐大师正在快速点评..." if is_live_mode else "齐大师正在调动命理能量磁场，深度推演中..."
             with st.spinner(spinner_msg):
-                if is_fengshui_request:
+                if is_case_story_request:
+                    max_tokens = {
+                        "30秒钩子": 900,
+                        "2分钟标准版": 1800,
+                        "4分钟完整版": 3000,
+                    }.get(case_story_length, 1800)
+                elif is_fengshui_request:
                     max_tokens = 1400
                 elif is_bracelet_request:
                     max_tokens = 1800
@@ -1717,7 +2605,9 @@ if user_payload and chosen_prompt:
                     max_tokens = 2400
                 else:
                     max_tokens = 8000
-                api_mode = "live" if is_live_mode else "full"
+                api_mode = "live" if (
+                    is_live_mode or is_bracelet_request or is_fengshui_request or is_case_story_request
+                ) else "full"
                 api_engines = get_api_engines(active_key, active_url, active_model, api_mode)
                 last_api_error = ""
                 for engine_label, engine_key, engine_url, engine_model in api_engines:
@@ -1742,7 +2632,10 @@ if user_payload and chosen_prompt:
                                 delta_content = None
                             if delta_content:
                                 current_full_text += delta_content
-                                st.session_state.main_report = current_full_text
+                                if is_case_story_request:
+                                    st.session_state.case_story_report = current_full_text
+                                else:
+                                    st.session_state.main_report = current_full_text
                                 now = time.monotonic()
                                 should_render = (
                                     now - last_render_at >= 0.35
@@ -1768,19 +2661,28 @@ if user_payload and chosen_prompt:
                 
                 placeholder.markdown(current_full_text)
                 if not current_full_text.strip():
-                    st.session_state.main_report = previous_main_report
-                    st.session_state.chat_history = previous_chat_history
-                    st.session_state.last_save_error = "本次生成没有返回正文，已保留上一份报告，请重试或切换更快模型。"
-                    st.error(st.session_state.last_save_error)
+                    if is_case_story_request:
+                        st.session_state.case_story_report = previous_case_story_report
+                        st.session_state.case_story_save_error = "本次案例没有返回正文，已保留上一份案例，请重试或切换接口。"
+                        st.error(st.session_state.case_story_save_error)
+                    else:
+                        st.session_state.main_report = previous_main_report
+                        st.session_state.chat_history = previous_chat_history
+                        st.session_state.last_save_error = "本次生成没有返回正文，已保留上一份报告，请重试或切换更快模型。"
+                        st.error(st.session_state.last_save_error)
                     placeholder.empty()
                 else:
-                    st.session_state.main_report = current_full_text
-                    
-                    st.session_state['last_name'] = final_name
-                    st.session_state['last_birth'] = final_birth
+                    if is_case_story_request:
+                        st.session_state.case_story_report = current_full_text
+                        st.session_state.case_story_record_name = final_name
+                        st.session_state.case_story_record_birth = final_birth
+                    else:
+                        st.session_state.main_report = current_full_text
+                        st.session_state.last_name = final_name
+                        st.session_state.last_birth = final_birth
 
                     review_status = "已跳过文案复核。"
-                    if st.session_state.get("enable_copy_review", True):
+                    if st.session_state.get("enable_copy_review", True) and not is_case_story_request:
                         primary_review_engine = ("快速版", api_key_live, base_url_live, model_live)
                         fallback_review_engine = ("当前引擎", active_key, active_url, active_model)
                         with st.spinner("齐大师正在做文案复核..."):
@@ -1798,22 +2700,32 @@ if user_payload and chosen_prompt:
                             st.success("文案复核完成，已修正明显语病和不顺口表达。")
                         else:
                             st.warning(review_status)
+                    elif is_case_story_request:
+                        review_status = "案例故事保留原始语言，已跳过中文文案复核。"
+                        st.session_state.case_story_review_status = review_status
                     else:
                         st.session_state.last_review_status = review_status
                     
                     save_started_at = time.monotonic()
-                    saved = save_record(
-                        st.session_state.last_name,
-                        st.session_state.last_birth,
-                        current_full_text,
-                        st.session_state.chat_history,
-                        st.session_state.current_prompt_type,
-                    )
+                    if is_case_story_request:
+                        saved = save_case_story_record(final_name, final_birth, current_full_text)
+                    else:
+                        saved = save_record(
+                            st.session_state.last_name,
+                            st.session_state.last_birth,
+                            current_full_text,
+                            st.session_state.chat_history,
+                            st.session_state.current_prompt_type,
+                        )
                     save_elapsed = time.monotonic() - save_started_at
                     if saved:
-                        st.success("推演报告已成功保存。")
+                        st.success("案例故事已单独保存。" if is_case_story_request else "推演报告已成功保存。")
                     else:
-                        st.warning("报告已生成，但自动保存失败。当前页面已保留完整内容，请先不要刷新页面，可以在报告下方点击重新保存。")
+                        st.warning(
+                            "案例已生成，但自动保存失败；个人测算报告未受影响。"
+                            if is_case_story_request
+                            else "报告已生成，但自动保存失败。当前页面已保留完整内容，请先不要刷新页面，可以在报告下方点击重新保存。"
+                        )
                     timing_parts = []
                     if generation_elapsed is not None:
                         timing_parts.append(f"API生成耗时：{generation_elapsed:.1f} 秒")
@@ -1825,29 +2737,64 @@ if user_payload and chosen_prompt:
 
         except Exception as e:
             if current_full_text.strip():
-                st.session_state.main_report = current_full_text
-                interrupted_msg = (
-                    "生成过程中连接中断，但已保留中断前内容。你可以先使用当前页面内容，"
-                    "或点击下方按钮把这份中断草稿重新保存到档案库。"
-                )
-                saved_partial = save_record(
-                    st.session_state.get("last_name", final_name),
-                    st.session_state.get("last_birth", final_birth),
-                    current_full_text,
-                    st.session_state.chat_history,
-                    st.session_state.current_prompt_type,
-                )
-                st.session_state.last_save_error = (
-                    "生成过程中连接中断，中断前内容已保存为草稿。"
-                    if saved_partial
-                    else interrupted_msg
-                )
+                if is_case_story_request:
+                    st.session_state.case_story_report = current_full_text
+                    st.session_state.case_story_record_name = final_name
+                    st.session_state.case_story_record_birth = final_birth
+                    saved_partial = save_case_story_record(final_name, final_birth, current_full_text)
+                    st.session_state.case_story_save_error = (
+                        "生成连接中断，中断前的案例内容已保存为独立草稿。"
+                        if saved_partial
+                        else "生成连接中断，案例草稿保留在当前页面；个人测算报告未受影响。"
+                    )
+                else:
+                    st.session_state.main_report = current_full_text
+                    interrupted_msg = (
+                        "生成过程中连接中断，但已保留中断前内容。你可以先使用当前页面内容，"
+                        "或点击下方按钮把这份中断草稿重新保存到档案库。"
+                    )
+                    saved_partial = save_record(
+                        st.session_state.get("last_name", final_name),
+                        st.session_state.get("last_birth", final_birth),
+                        current_full_text,
+                        st.session_state.chat_history,
+                        st.session_state.current_prompt_type,
+                    )
+                    st.session_state.last_save_error = (
+                        "生成过程中连接中断，中断前内容已保存为草稿。"
+                        if saved_partial
+                        else interrupted_msg
+                    )
+            elif is_case_story_request:
+                st.session_state.case_story_report = previous_case_story_report
             elif not st.session_state.get("last_save_error"):
                 st.session_state.main_report = previous_main_report
                 st.session_state.chat_history = previous_chat_history
             st.error(format_generation_error(e))
 
-# --- 8. 追加提问逻辑 ---
+# --- 8. 独立案例展示与主报告追问 ---
+if st.session_state.get("case_story_report"):
+    # 持久化案例始终归属于案例标签。不要在标签外复用之前创建的容器，
+    # 否则 Streamlit rerun 后容易让案例与个人报告看起来处在同一输出区。
+    with tab_case_story:
+        st.markdown("---")
+        st.subheader("🎙️ 五行案例故事")
+        st.markdown(st.session_state.case_story_report)
+        if st.session_state.get("case_story_review_status"):
+            st.caption(f"案例状态：{st.session_state.case_story_review_status}")
+        if st.session_state.get("case_story_save_error"):
+            st.warning(st.session_state.case_story_save_error)
+            if st.button("重新保存五行案例故事", key="retry_save_case_story"):
+                saved = save_case_story_record(
+                    st.session_state.get("case_story_record_name", ""),
+                    st.session_state.get("case_story_record_birth", ""),
+                    st.session_state.case_story_report,
+                )
+                if saved:
+                    st.success("案例故事已重新保存，个人测算报告未改变。")
+                else:
+                    st.error(st.session_state.case_story_save_error or "案例故事重新保存失败。")
+
 if st.session_state.main_report:
     st.markdown("---")
     st.subheader("📜 核心能量推演报告 (Reporte Principal)")
@@ -1930,6 +2877,8 @@ if st.session_state.main_report:
             active_prompt = PROMPT_BRACELET
         elif st.session_state.current_prompt_type == "fengshui":
             active_prompt = PROMPT_FENGSHUI_LIVE
+        elif st.session_state.current_prompt_type == "case_story":
+            active_prompt = PROMPT_CASE_STORY
         else:
             active_prompt = PROMPT_SINGLE
         
@@ -1937,6 +2886,8 @@ if st.session_state.main_report:
             follow_up_constraint = "\n\n⚠️【追问约束】：继续围绕直播风水知识普及来回答，不要切回八字测算；默认输出中文直接口播稿，像主播能照着讲的版本。"
         elif st.session_state.current_prompt_type == "bracelet":
             follow_up_constraint = "\n\n⚠️【追问约束】：继续围绕八字手串推荐来回答，必须继承主报告中已经给出的手串方向，绝对禁止前后矛盾。"
+        elif st.session_state.current_prompt_type == "case_story":
+            follow_up_constraint = "\n\n【追问约束】：继续围绕当前脱敏案例故事修改，不得切回传统八字报告，不得补出真实姓名、完整生日、四柱或其他可识别信息。保持主案例使用的语言。"
         else:
             follow_up_constraint = "\n\n⚠️【严厉约束】：在回答后续追问时，你必须严格继承主报告中已经给出的所有测算结论和特定手串推荐方案，绝对禁止前后矛盾！"
 
@@ -1948,7 +2899,12 @@ if st.session_state.main_report:
             messages.append({"role": "user", "content": chat['question']})
             messages.append({"role": "assistant", "content": chat['answer']})
         
-        messages.append({"role": "user", "content": f"{user_question} (请务必提供西语+中文对照)"})
+        follow_up_language_note = (
+            "请保持当前案例故事的输出语言。"
+            if st.session_state.current_prompt_type == "case_story"
+            else "请务必提供西语+中文对照。"
+        )
+        messages.append({"role": "user", "content": f"{user_question} ({follow_up_language_note})"})
 
         try:
             with st.spinner("齐大师正在回复..."):
