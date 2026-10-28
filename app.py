@@ -9,6 +9,7 @@ import time
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
+from api_transport import build_chat_completion_kwargs, iter_chat_text, normalize_base_url
 
 try:
     from lunar_python import Solar
@@ -1189,9 +1190,9 @@ def review_copy_text(raw_text, primary_engine, fallback_engine=None, context_lab
         if not api_key or not base_url or not model:
             continue
         try:
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=300.0)
+            client = OpenAI(api_key=api_key, base_url=normalize_base_url(base_url), timeout=300.0)
             max_tokens = min(2200, max(900, int(len(raw_text) * 0.6)))
-            resp = client.chat.completions.create(
+            resp = client.chat.completions.create(**build_chat_completion_kwargs(
                 model=model,
                 messages=[
                     {"role": "system", "content": review_prompt},
@@ -1203,7 +1204,7 @@ def review_copy_text(raw_text, primary_engine, fallback_engine=None, context_lab
                 stream=False,
                 temperature=0.1,
                 max_tokens=max_tokens,
-            )
+            ))
             revised = resp.choices[0].message.content.strip()
             if revised:
                 return revised, True, f"已完成{engine_label}文案复核。"
@@ -2612,8 +2613,9 @@ if user_payload and chosen_prompt:
                 last_api_error = ""
                 for engine_label, engine_key, engine_url, engine_model in api_engines:
                     try:
-                        client = OpenAI(api_key=engine_key, base_url=engine_url, timeout=120.0)
-                        response = client.chat.completions.create(
+                        client = OpenAI(api_key=engine_key, base_url=normalize_base_url(engine_url), timeout=120.0)
+                        final_finish_reason = ""
+                        kwargs = build_chat_completion_kwargs(
                             model=engine_model,
                             messages=[
                                 {"role": "system", "content": system_prompt},
@@ -2623,13 +2625,9 @@ if user_payload and chosen_prompt:
                             temperature=0.8,
                             max_tokens=max_tokens,
                         )
-                        for chunk in response:
-                            if chunk.choices:
-                                if chunk.choices[0].finish_reason:
-                                    final_finish_reason = chunk.choices[0].finish_reason
-                                delta_content = getattr(chunk.choices[0].delta, "content", None)
-                            else:
-                                delta_content = None
+                        for delta_content, finish_reason in iter_chat_text(client, kwargs):
+                            if finish_reason:
+                                final_finish_reason = finish_reason
                             if delta_content:
                                 current_full_text += delta_content
                                 if is_case_story_request:
@@ -2649,6 +2647,12 @@ if user_payload and chosen_prompt:
                             if engine_label != "首选接口":
                                 st.info(f"首选接口响应异常，已自动切换到{engine_label}。")
                             break
+                        if final_finish_reason == "length":
+                            last_api_error = "模型在输出正文前已用完生成额度（finish_reason=length），请增加额度或降低推理强度。"
+                        elif final_finish_reason == "content_filter":
+                            last_api_error = "模型平台拦截了本次输出（finish_reason=content_filter）。"
+                        else:
+                            last_api_error = f"接口没有返回正文（finish_reason={final_finish_reason or '未提供'}），请核对模型和接口配置。"
                     except Exception as api_error:
                         last_api_error = str(api_error)
                         if current_full_text.strip():
@@ -2868,7 +2872,7 @@ if st.session_state.main_report:
             st.error(config_error)
             st.stop()
 
-        client = OpenAI(api_key=api_key_full, base_url=base_url_full, timeout=600.0)
+        client = OpenAI(api_key=api_key_full, base_url=normalize_base_url(base_url_full), timeout=600.0)
         if st.session_state.current_prompt_type == "double":
             active_prompt = PROMPT_DOUBLE
         elif st.session_state.current_prompt_type == "bazi":
@@ -2908,13 +2912,13 @@ if st.session_state.main_report:
 
         try:
             with st.spinner("齐大师正在回复..."):
-                resp = client.chat.completions.create(
+                resp = client.chat.completions.create(**build_chat_completion_kwargs(
                     model=model_full,
                     messages=messages,
                     stream=False,
                     max_tokens=2500,
-                    temperature=0.3 
-                )
+                    temperature=0.3
+                ))
                 new_answer = resp.choices[0].message.content
                 st.session_state.chat_history.append({"question": user_question, "answer": new_answer})
                 
@@ -2929,3 +2933,4 @@ if st.session_state.main_report:
                     st.rerun()
         except Exception as e:
             st.error(format_generation_error(e))
+
