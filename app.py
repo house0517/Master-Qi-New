@@ -6,6 +6,8 @@ import random
 import re
 import sqlite3
 import time
+import urllib.error
+import urllib.request
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
@@ -1496,6 +1498,173 @@ def get_gsheets_connection():
         return None
 
 
+# --- 4-0. Supabase Postgres 云端存档（无需 Google 服务账号密钥） ---
+def get_supabase_table():
+    table = str(get_config("storage", "table", "STORAGE_TABLE", "master_qi_records") or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table):
+        raise ValueError("档案表名称只能包含字母、数字和下划线。")
+    return table
+
+SUPABASE_TIMEOUT_SECONDS = 20
+STORAGE_SHORT_LABELS = {
+    "supabase": "Supabase",
+    "gsheets": "Google Sheets",
+    "sqlite": "本地 SQLite",
+}
+STORAGE_CAPTIONS = {
+    "supabase": "当前档案存储：Supabase Postgres 云端持久化",
+    "gsheets": "当前档案存储：Google Sheets 云端持久化",
+    "sqlite": "当前档案存储：本地 SQLite（容器重启后会丢失）",
+}
+
+
+def get_supabase_config():
+    url = str(get_config("supabase", "url", "SUPABASE_URL", "") or "").strip().rstrip("/")
+    key = str(
+        get_config("supabase", "service_role_key", "SUPABASE_SERVICE_ROLE_KEY", "") or ""
+    ).strip()
+    if not key:
+        key = str(get_config("supabase", "anon_key", "SUPABASE_ANON_KEY", "") or "").strip()
+    return url, key
+
+
+def has_supabase_secrets():
+    url, key = get_supabase_config()
+    if not url or not key:
+        return False
+    return url.startswith("https://") or url.startswith("http://")
+
+
+def looks_like_jwt(value):
+    """旧版 Supabase key（anon / service_role）是三段式 JWT，新版不是。"""
+    return str(value or "").startswith("eyJ") and str(value).count(".") == 2
+
+
+def supabase_request(method, path, payload=None, prefer=""):
+    """Call the PostgREST endpoint with the project API key, without extra SDKs."""
+    url, key = get_supabase_config()
+    if not url or not key:
+        raise RuntimeError("未配置 Supabase URL 或 API Key。")
+
+    endpoint = f"{url}/rest/v1/{path}"
+    headers = {
+        "apikey": key,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    # 旧版 service_role key 是 JWT，需要同时放进 Authorization；
+    # 新版 sb_secret_... 不是 JWT，只走 apikey 头，重复发 Bearer 会被判为无效令牌。
+    if looks_like_jwt(key):
+        headers["Authorization"] = f"Bearer {key}"
+    if prefer:
+        headers["Prefer"] = prefer
+    body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(endpoint, data=body, headers=headers, method=method)
+
+    try:
+        with urllib.request.urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:
+            raw = response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        try:
+            detail = error.read().decode("utf-8", "replace")
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            f"HTTP {error.code}：{(detail or str(error.reason))[:400]}"
+        ) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"无法连接 Supabase：{error.reason}") from error
+
+    if not raw.strip():
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"Supabase 返回了无法解析的内容：{raw[:200]}")
+
+
+def normalize_supabase_row(row):
+    normalized = {column: row.get(column, "") for column in RECORD_COLUMNS}
+    for column in ("name", "birth_info", "report", "history", "date", "ptype"):
+        value = normalized.get(column)
+        normalized[column] = "" if value is None else str(value)
+    try:
+        normalized["id"] = int(normalized.get("id") or 0)
+    except (TypeError, ValueError):
+        normalized["id"] = 0
+    normalized["ptype"] = normalized["ptype"] or "single"
+    return normalized
+
+
+@st.cache_data(ttl=20, max_entries=1, show_spinner=False)
+def read_supabase_records():
+    records = []
+    offset = 0
+    while True:
+        rows = supabase_request(
+            "GET",
+            f"{get_supabase_table()}?select=id,name,birth_info,report,history,date,ptype&order=id.desc&limit=500&offset={offset}",
+        ) or []
+        if not isinstance(rows, list):
+            raise RuntimeError("云端档案返回格式错误。")
+        records.extend(normalize_supabase_row(row) for row in rows)
+        if len(rows) < 500:
+            return records
+        offset += len(rows)
+
+
+def save_to_supabase(name, birth, report, history, ptype="single"):
+    if not has_supabase_secrets():
+        return False
+
+    try:
+        name, birth, ptype = normalize_record_identity(name, birth, ptype)
+        payload = {
+            "name": name,
+            "birth_info": birth,
+            "ptype": ptype,
+            "report": str(report),
+            "history": history_to_text(history),
+            "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        supabase_request(
+            "POST",
+            f"{get_supabase_table()}?on_conflict=name,birth_info,ptype",
+            payload,
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+        read_supabase_records.clear()
+        st.toast("⚡ 齐大师云端档案已同步（Supabase）！")
+        return True
+    except Exception as e:
+        st.error(f"Supabase 写入失败，将尝试保存到本地 SQLite：{e}")
+        return False
+
+
+def configured_storage_backend():
+    explicit = str(
+        get_config("storage", "backend", "STORAGE_BACKEND", "") or ""
+    ).strip().lower()
+    return explicit if explicit in ("supabase", "gsheets", "sqlite") else ""
+
+
+def active_storage_backend():
+    """Resolve which archive backend is actually usable in this deployment."""
+    explicit = configured_storage_backend()
+    if explicit == "supabase":
+        return "supabase" if has_supabase_secrets() else "sqlite"
+    if explicit == "gsheets":
+        return "gsheets" if has_gsheets_secrets() else "sqlite"
+    if explicit == "sqlite":
+        return "sqlite"
+    if has_supabase_secrets():
+        return "supabase"
+    if has_gsheets_secrets():
+        return "gsheets"
+    return "sqlite"
+
+
+
 def normalize_records_df(df):
     if df is None or df.empty:
         return pd.DataFrame(columns=RECORD_COLUMNS)
@@ -1579,36 +1748,51 @@ def load_records_from_sqlite():
     ]
 
 
+def merge_local_only_records(cloud_records):
+    """Keep local SQLite rows that never made it to the cloud archive."""
+    local_records = load_records_from_sqlite()
+    seen = {
+        (
+            str(row.get("name", "")),
+            str(row.get("birth_info", "")),
+            str(row.get("ptype", "")),
+        )
+        for row in cloud_records
+    }
+    local_only = []
+    for row in local_records:
+        key = (
+            str(row.get("name", "")),
+            str(row.get("birth_info", "")),
+            str(row.get("ptype", "")),
+        )
+        if key not in seen and str(row.get("report", "")).strip():
+            row = dict(row)
+            row["id"] = f"local-{row.get('id')}"
+            local_only.append(row)
+    return local_only + cloud_records
+
+
 def load_records():
-    gsheets = get_gsheets_connection()
-    if gsheets:
+    backend = active_storage_backend()
+
+    if backend == "supabase":
         try:
-            df = read_gsheets_records(get_gsheets_worksheet())
-            df = df.sort_values("id", ascending=False)
-            cloud_records = df.to_dict("records")
-            local_records = load_records_from_sqlite()
-            seen = {
-                (
-                    str(row.get("name", "")),
-                    str(row.get("birth_info", "")),
-                    str(row.get("ptype", "")),
-                )
-                for row in cloud_records
-            }
-            local_only = []
-            for row in local_records:
-                key = (
-                    str(row.get("name", "")),
-                    str(row.get("birth_info", "")),
-                    str(row.get("ptype", "")),
-                )
-                if key not in seen and str(row.get("report", "")).strip():
-                    row = dict(row)
-                    row["id"] = f"local-{row.get('id')}"
-                    local_only.append(row)
-            return local_only + cloud_records
+            return merge_local_only_records(read_supabase_records())
         except Exception as e:
-            st.warning(f"读取云端档案失败，已临时读取本地 SQLite：{e}")
+            st.warning(f"读取 Supabase 档案失败，已临时读取本地 SQLite：{e}")
+            return load_records_from_sqlite()
+
+    if backend == "gsheets":
+        gsheets = get_gsheets_connection()
+        if gsheets:
+            try:
+                df = read_gsheets_records(get_gsheets_worksheet())
+                df = df.sort_values("id", ascending=False)
+                return merge_local_only_records(df.to_dict("records"))
+            except Exception as e:
+                st.warning(f"读取云端档案失败，已临时读取本地 SQLite：{e}")
+
     return load_records_from_sqlite()
 
 
@@ -1649,7 +1833,7 @@ def save_to_sqlite(name, birth, report, history, ptype="single"):
         history_str = history_to_text(history)
         date_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        c.execute("SELECT id FROM records WHERE name=? AND birth_info=?", (str(name), str(birth)))
+        c.execute("SELECT id FROM records WHERE name=? AND birth_info=? AND COALESCE(ptype, 'single')=?", (str(name), str(birth), str(ptype)))
         row = c.fetchone()
 
         if row:
@@ -1661,7 +1845,7 @@ def save_to_sqlite(name, birth, report, history, ptype="single"):
 
         conn.commit()
         conn.close()
-        st.toast("⚡ 齐大师永久记忆已同步！")
+        st.toast("报告已保存到本地 SQLite。")
         return True
     except Exception as e:
         st.error(f"数据库写入失败: {e}")
@@ -1737,16 +1921,55 @@ def save_record(name, birth, report, history, ptype="single"):
         st.session_state.last_save_error = identity_error
         return False
 
-    if save_to_gsheets(name, birth, report, history, ptype):
+    backend = active_storage_backend()
+    cloud_saver = {"supabase": save_to_supabase, "gsheets": save_to_gsheets}.get(backend)
+    if cloud_saver and cloud_saver(name, birth, report, history, ptype):
         st.session_state.last_save_ok = True
         return True
+
     saved_local = save_to_sqlite(name, birth, report, history, ptype)
     st.session_state.last_save_ok = saved_local
-    if saved_local:
-        st.session_state.last_save_error = "云端 Google Sheets 保存失败，已临时保存到本地 SQLite。线上环境重启后本地记录可能丢失，请稍后重试云端保存。"
-    else:
-        st.session_state.last_save_error = "云端和本地保存都失败。本次结果已保留在当前页面，请先不要刷新页面。"
+    if backend in ("supabase", "gsheets"):
+        if saved_local:
+            st.session_state.last_save_error = (
+                f"云端 {STORAGE_SHORT_LABELS[backend]} 保存失败，已临时保存到本地 SQLite。"
+                "线上环境重启后本地记录可能丢失，请稍后重试云端保存。"
+            )
+        else:
+            st.session_state.last_save_error = "云端和本地保存都失败。本次结果已保留在当前页面，请先不要刷新页面。"
+    if backend == "sqlite":
+        st.session_state.last_save_error = (
+            "当前只保存到本地 SQLite，尚未同步云端；服务器重建后可能丢失，请配置云端档案库。"
+            if saved_local else "本地保存失败，当前报告仍保留在页面，请先下载备份。"
+        )
     return saved_local
+
+
+
+def sync_local_records_to_supabase():
+    """Upload local-only identities, preserving cloud reports and original dates."""
+    if active_storage_backend() != "supabase":
+        raise RuntimeError("请先配置 Supabase 云端档案库。")
+    read_supabase_records.clear()
+    cloud = read_supabase_records()
+    seen = {normalize_record_identity(r.get("name"), r.get("birth_info"), r.get("ptype")) for r in cloud}
+    uploaded, skipped, failed = 0, 0, 0
+    for record in load_records_from_sqlite():
+        identity = normalize_record_identity(record.get("name"), record.get("birth_info"), record.get("ptype"))
+        if identity in seen or not str(record.get("report") or "").strip() or validate_record_identity(*identity):
+            skipped += 1
+            continue
+        payload = {key: record.get(key, "") for key in RECORD_COLUMNS if key != "id"}
+        payload.update(name=identity[0], birth_info=identity[1], ptype=identity[2])
+        try:
+            supabase_request("POST", f"{get_supabase_table()}?on_conflict=name,birth_info,ptype", payload,
+                             prefer="resolution=ignore-duplicates,return=minimal")
+            seen.add(identity)
+            uploaded += 1
+        except Exception:
+            failed += 1
+    read_supabase_records.clear()
+    return uploaded, skipped, failed
 
 
 def save_case_story_record(name, birth, report):
@@ -1835,13 +2058,36 @@ with st.sidebar:
     st.markdown("---")
     st.title("📂 永久档案库")
 
-    if has_gsheets_secrets():
-        st.caption("当前档案存储：Google Sheets 云端持久化")
-    else:
-        st.caption("当前档案存储：本地 SQLite")
-        st.warning("如果部署在 Streamlit Cloud，请配置 Google Sheets Secrets，否则重启或重新部署后历史档案可能丢失。")
+    storage_backend = active_storage_backend()
+    st.caption(STORAGE_CAPTIONS[storage_backend])
+    if storage_backend == "supabase":
+        st.caption(f"档案表：{get_supabase_table()}")
+    elif storage_backend == "sqlite":
+        st.warning("尚未连接云端档案库。当前记录仅保存在服务器本地，重建后可能丢失。")
+        with st.expander("云端存储配置方法"):
+            st.markdown("在 Supabase 执行仓库中的 `supabase_schema.sql`，再在本应用 Secrets 中配置：")
+            st.code('[storage]\nbackend = "supabase"\ntable = "master_qi_records"\n\n[supabase]\nurl = "填写项目 URL"\nservice_role_key = "填写项目 secret key"', language="toml")
+
+    if st.button("刷新档案列表", key="refresh_archive"):
+        read_supabase_records.clear()
+        read_gsheets_records.clear()
+
+    if storage_backend == "supabase" and st.button("将本地未同步记录保存到云端", key="sync_local_archives"):
+        try:
+            with st.spinner("正在同步本地记录…"):
+                uploaded, skipped, failed = sync_local_records_to_supabase()
+            if failed:
+                st.warning(f"同步成功 {uploaded} 条，跳过 {skipped} 条，失败 {failed} 条；本地记录仍保留，可重试。")
+            else:
+                st.success(f"同步成功 {uploaded} 条，跳过已有或空记录 {skipped} 条。")
+        except Exception as error:
+            st.error(f"同步失败，本地记录仍保留：{error}")
 
     history_list = load_records()
+    st.caption(f"已读取 {len(history_list)} 条测算记录")
+    if history_list:
+        st.download_button("下载全部记录备份", data=json.dumps(history_list, ensure_ascii=False, indent=2),
+                           file_name="master-qi-records-backup.json", mime="application/json", key="download_archive_backup")
 
     if history_list:
         search_name = st.text_input(
@@ -1860,7 +2106,7 @@ with st.sidebar:
             st.info("没有找到匹配的人名档案。")
         else:
             record_options = {
-                f"{row.get('name', '')} (生日: {row.get('birth_info', '')}) [{row.get('date', '')}]": row
+                f"{row.get('name', '')} (生日: {row.get('birth_info', '')}) [{row.get('ptype', 'single')}] [{row.get('date', '')}] #{row.get('id', '')}": row
                 for row in filtered_history
             }
             selected_label = st.selectbox(
@@ -2850,7 +3096,7 @@ if st.session_state.main_report:
             elif saved:
                 st.warning(st.session_state.last_save_error)
             else:
-                st.error(st.session_state.last_save_error or "重新保存失败，请检查姓名、生日和 Google Sheets 配置。")
+                st.error(st.session_state.last_save_error or "重新保存失败，请检查姓名、生日和云端档案库配置。")
     
     st.markdown("---")
     st.subheader("💬 客户追问与补充历史")
@@ -2933,4 +3179,5 @@ if st.session_state.main_report:
                     st.rerun()
         except Exception as e:
             st.error(format_generation_error(e))
+
 
