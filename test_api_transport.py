@@ -7,6 +7,24 @@ from openai import OpenAI
 from api_transport import build_chat_completion_kwargs, iter_chat_text, normalize_base_url, ResponseFormatError
 
 class CompatibilityTests(unittest.TestCase):
+    def test_deepseek_flash_sends_non_thinking_request_and_reads_body(self):
+        for model in ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']:
+            def handler(request):
+                body = json.loads(request.content)
+                self.assertEqual(body['thinking'], {'type': 'disabled'})
+                self.assertEqual(body['max_tokens'], 2400)
+                self.assertEqual(body['model'], model)
+                return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+                    content='data: '+json.dumps({'choices':[{'index':0,'delta':{'content':'完整正文'},'finish_reason':'stop'}]})+'\n\ndata: [DONE]\n\n')
+            with OpenAI(api_key='test-only', base_url='https://api.deepseek.com',
+                http_client=httpx.Client(transport=httpx.MockTransport(handler))) as client:
+                args = build_chat_completion_kwargs(model, [{'role':'user','content':'test'}], True, 2400, .8)
+                self.assertEqual(list(iter_chat_text(client, args)), [('完整正文', 'stop')])
+
+    def test_reasoning_models_not_changed_to_non_thinking(self):
+        for model in ['deepseek-v4-pro', 'deepseek-reasoner', 'kimi-k3', 'other']:
+            self.assertNotIn('extra_body', build_chat_completion_kwargs(model, [], True, 2400, .8))
+
     def test_kimi_parameters(self):
         for limit,temp in [(2400,.8),(8000,.8),(900,.1),(2500,.3)]:
             args=build_chat_completion_kwargs('kimi-k3',[],True,limit,temp)
