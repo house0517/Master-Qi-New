@@ -66,6 +66,7 @@ def build_chat_completion_kwargs(model, messages, stream=False, max_tokens=None,
     Kimi K3 docs recommend fixed sampling params and use max_completion_tokens
     instead of max_tokens. DeepSeek Flash defaults to thinking, which can use
     the entire short report budget before returning any visible content.
+    DeepSeek Pro keeps thinking enabled at low effort to leave room for the report.
     """
     kwargs = {
         "model": model,
@@ -81,7 +82,9 @@ def build_chat_completion_kwargs(model, messages, stream=False, max_tokens=None,
             "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
         }:
             kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-        if temperature is not None:
+        if str(model or "").strip().lower() == "deepseek-v4-pro":
+            kwargs["reasoning_effort"] = "low"
+        elif temperature is not None:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens

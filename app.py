@@ -1193,7 +1193,7 @@ def review_copy_text(raw_text, primary_engine, fallback_engine=None, context_lab
             continue
         try:
             client = OpenAI(api_key=api_key, base_url=normalize_base_url(base_url), timeout=300.0)
-            max_tokens = min(2200, max(900, int(len(raw_text) * 0.6)))
+            max_tokens = min(20000, max(2200, len(raw_text)))
             resp = client.chat.completions.create(**build_chat_completion_kwargs(
                 model=model,
                 messages=[
@@ -1207,9 +1207,12 @@ def review_copy_text(raw_text, primary_engine, fallback_engine=None, context_lab
                 temperature=0.1,
                 max_tokens=max_tokens,
             ))
-            revised = resp.choices[0].message.content.strip()
-            if revised:
+            choice = resp.choices[0]
+            revised = (choice.message.content or "").strip()
+            # A copy edit must not replace a complete report with a partial rewrite.
+            if choice.finish_reason == "stop" and len(revised) >= len(raw_text) * 0.85:
                 return revised, True, f"已完成{engine_label}文案复核。"
+            last_error = "复核正文不完整。"
         except Exception as e:
             last_error = str(e)
             continue
@@ -2859,17 +2862,35 @@ if user_payload and chosen_prompt:
                 last_api_error = ""
                 for engine_label, engine_key, engine_url, engine_model in api_engines:
                     try:
-                        client = OpenAI(api_key=engine_key, base_url=normalize_base_url(engine_url), timeout=120.0)
+                        normalized_url = normalize_base_url(engine_url)
+                        official_deepseek = normalized_url in ("https://api.deepseek.com", "https://api.deepseek.com/v1")
+                        deepseek_full = official_deepseek and api_mode == "full"
+                        deepseek_live = official_deepseek and is_live_mode and not (
+                            is_case_story_request or is_fengshui_request or is_bracelet_request
+                        )
+                        request_limit = 20000 if deepseek_full else 4096 if deepseek_live else max_tokens
+                        request_prompt = system_prompt
+                        if deepseek_full:
+                            request_prompt = chosen_prompt + (
+                                "\n\n【完整版深度模式】不输出 PARTE 0。完成 PARTE I 至 IV，"
+                                "每个模块依次给出完整西语和中文。为后续模块预留篇幅，"
+                                "优先压缩重复论述，逐月分析和最后的行动建议必须写完。"
+                            )
+                        client = OpenAI(
+                            api_key=engine_key,
+                            base_url=normalized_url,
+                            timeout=300.0 if deepseek_full else 120.0,
+                        )
                         final_finish_reason = ""
                         kwargs = build_chat_completion_kwargs(
                             model=engine_model,
                             messages=[
-                                {"role": "system", "content": system_prompt},
+                                {"role": "system", "content": request_prompt},
                                 {"role": "user", "content": user_payload}
                             ],
                             stream=True,
                             temperature=0.8,
-                            max_tokens=max_tokens,
+                            max_tokens=request_limit,
                         )
                         for delta_content, finish_reason in iter_chat_text(client, kwargs):
                             if finish_reason:
@@ -2932,7 +2953,11 @@ if user_payload and chosen_prompt:
                         st.session_state.last_birth = final_birth
 
                     review_status = "已跳过文案复核。"
-                    if st.session_state.get("enable_copy_review", True) and not is_case_story_request:
+                    if (
+                        final_finish_reason == "stop"
+                        and st.session_state.get("enable_copy_review", True)
+                        and not is_case_story_request
+                    ):
                         primary_review_engine = ("快速版", api_key_live, base_url_live, model_live)
                         fallback_review_engine = ("当前引擎", active_key, active_url, active_model)
                         with st.spinner("齐大师正在做文案复核..."):
@@ -2982,7 +3007,9 @@ if user_payload and chosen_prompt:
                     timing_parts.append(f"档案保存耗时：{save_elapsed:.1f} 秒")
                     st.caption("｜".join(timing_parts))
                     if final_finish_reason == "length":
-                        st.warning("模型达到本次输出长度上限，报告可能没有完全写完。当前已生成内容已保存，可以用追问继续补全后半段。")
+                        st.warning("模型达到本次输出长度上限，当前内容可能不完整，可以用追问继续补全。")
+                    elif final_finish_reason != "stop":
+                        st.warning("接口未正常结束生成，已保留收到的正文。请检查报告是否完整，可用追问补全或重新生成。")
                     placeholder.empty()
 
         except Exception as e:
@@ -3162,10 +3189,15 @@ if st.session_state.main_report:
                     model=model_full,
                     messages=messages,
                     stream=False,
-                    max_tokens=2500,
+                    max_tokens=8192 if model_full.strip().lower() == "deepseek-v4-pro" else 2500,
                     temperature=0.3
                 ))
-                new_answer = resp.choices[0].message.content
+                choice = resp.choices[0]
+                new_answer = (choice.message.content or "").strip()
+                if not new_answer:
+                    raise RuntimeError("追问未返回正文，请重试。")
+                if choice.finish_reason != "stop":
+                    new_answer += "\n\n（本次追问未完整结束，可继续补问。）"
                 st.session_state.chat_history.append({"question": user_question, "answer": new_answer})
                 
                 saved = save_record(
